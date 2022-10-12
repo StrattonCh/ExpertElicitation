@@ -250,6 +250,7 @@ nregions = 4
 sim_gp_predict_counts <- function(n = 100, seed = 1, beta = c(0,1), p = .5, nregions = 4){
   # housekeeping
   if((sqrt(n) %% 1) != 0) stop("n should be a perfect square")
+  if((sqrt(nregions) %% 1) != 0) stop("nregions should be a perfect square")
   if(n %% 4 != 0) stop("n should be divisible by nregions")
   set.seed(seed)
   sigma = 1
@@ -266,7 +267,13 @@ sim_gp_predict_counts <- function(n = 100, seed = 1, beta = c(0,1), p = .5, nreg
     grid, 
     grid %>% st_as_sf %>% st_centroid %>% st_coordinates
   ) %>%
-    rename(x_centroid = 2, y_centroid = 3)
+    rename(x_centroid = 2, y_centroid = 3) %>%
+    mutate(
+      group = case_when(
+        x_centroid <= seq(0, sqrt(n), sqrt(nregions)) 
+      )
+    )
+    
   
   
   # spatial random effects
