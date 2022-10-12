@@ -1,0 +1,419 @@
+---
+title: "Statistical methods for incoporating expert elicitation in occupancy modeling frameworks"
+description: |
+  A simulation study in implementation of hierarchical models to accommodate expert elicitation with bat occupancy data
+author:
+  - name: Christian Stratton
+    affiliation: Montana State University
+    affiliation_url: https://math.montana.edu/
+  - name: Kathryn Irvine
+    affiliation: USGS Northern Rocky Mountain Science Center
+    affiliation_url: https://www.usgs.gov/centers/norock
+  - name: Brad Udell
+    affiliation: USGS Fort Collins Science Center
+    affiliation_url: https://www.usgs.gov/centers/fort-collins-science-center
+  - name: Brian Reichert
+    affiliation: USGS Fort Collins Science Center
+    affiliation_url: https://www.usgs.gov/centers/fort-collins-science-center
+date: "`r Sys.Date()`"
+output: 
+  distill::distill_article:
+    self_contained: false
+    toc: true
+    toc_depth: 2
+bibliography: bibliography.bib
+csl: biometrics_notes.csl
+---
+
+```{r setup, include = F}
+rm(list = ls())
+
+library(knitr)
+hook_chunk <- knitr::knit_hooks$get('chunk')
+knit_hooks$set(chunk = function(x, options) {
+
+  # add latex commands if chunk option singlespacing is TRUE
+  if(isTRUE(options$singlespacing)){
+    return(sprintf("\\singlespacing\n %s \n\\doublespacing", hook_chunk(x, options)))
+  } else{
+    return(hook_chunk(x, options))
+  }
+})
+knitr::opts_chunk$set(
+  fig.align = "center",
+  tidy = T,
+  singlespacing = TRUE,
+  cache = FALSE,
+  fig.dim = c(10,8),
+  message = FALSE,
+  warning = FALSE,
+  comment = NA,
+  echo = F
+)
+
+
+# packages
+packs <- c("dplyr", "htmltools", "ggplot2", "sf", "readr", "parallel", "xtable", "tidyr", "stringr", "tidyverse", "ggalluvial", "lubridate", "ggnewscale")
+sapply(packs, require, character.only = T)
+rm(packs)
+options(tidyverse.quiet = TRUE)
+
+# convenience
+`%notin%` <- Negate("%in%")
+
+# stan settings
+options(mc.cores = parallel::detectCores() - 1)
+```
+
+# Introduction
+
+# Model framework
+
+## Base site-occupancy modeling framework
+
+For now, we layer this framework on a standard occupancy model. Let $i$ index the location, $j$ index the visit to site $i$, and $Z_i$ denote the partially observed occupancy states of sites $1, \dots, n$. Then,
+\[
+\begin{split}
+Z_i &\sim \text{Bernoulli}(\psi_i) \\
+y_i &\sim \text{Bernoulli}(z_i p_{ij})
+\end{split}
+\]
+where $\text{logit}(\psi_i) = x_i'\beta$ and $\text{logit}(p_{ij}) = W\alpha$.
+
+## Addition of random effects
+
+To accommodate extra sources of variation not captured by $X$, we include spatial random effects for each site. 
+\[
+\begin{split}
+Z_i &\sim \text{Bernoulli}(\psi_i) \\
+y_i &\sim \text{Bernoulli}(z_i p_{ij})
+\end{split}
+\]
+where $\text{logit}(\psi_i) = x_i'\beta + \eta_i$ and $\text{logit}(p_{ij}) = W\alpha$.
+
+# Expert response structure
+
+The goal is to collect information from experts in a way that can easily inform the prior distributions for the spatial random effects. One option is to solicit feedback directly on the occupancy probabilities, then map those probabilities to the real line. 
+
+## Daubenmire classes
+
+To aid in describing the uncertainties in this mapping, one could use the Daubenmire coverage class [@daubenmire1959]. 
+
+```{r, results = "asis"}
+logit <- function(p) log(p / (1-p))
+daub <- round(tibble(
+  `Class` = 1:6,
+  `Lower` = c(0, .05, .25, .50, .75, .95),
+  `Upper` = c(.05, .25, .50, .75, .95, 1)
+) %>%
+  mutate(`Midpoint` = (Lower + Upper)/2) %>%
+  mutate(
+    logitL = logit(Lower+.01), 
+    logitM = logit(Midpoint),
+    logitU = logit(Upper-.01)
+  ), 2)
+
+knitr::kable(daub, caption = "Table 1: Daubenmire coverage classes (Daubenmire, 1959).")
+```
+
+## Normal k-root-mean-weighted mapping
+
+There are many potential mappings for expert feedback in the form of Daubenmire classes. Generally, the mapping should imply lesser probability of occurrence for lower classes. Additionally, it may be reasonable to imply greater certainty in large classes (i.e. probabilities close to 0 and 1 are more certain than those close to 0). Finally, it is computationally attractive to restrict mappings to the Normal family of distributions (though this can be relaxed). A mapping that satisfies these requirements is described below.
+
+Let $l_i, u_i$, and $\mu_i$ denote the implied lower, upper, and midpoints of each class on the logit scale. Then the normal mean-weighted mapping proceeds as follows. For each class $i$ and any positive real $k$, find $\sigma_i$ such that 
+\[
+\int_{l_i}^{u_i} p\left(y \big| \mu_i,\frac{1}{|\mu_i|^k} \sigma_i\right) dy = .95
+\]
+where $p(y | \mu, \sigma)$ is the density function for a normal random variate with mean $\mu$ and standard deviation $\sigma$. 
+
+```{r, eval = T, warning = F}
+# function to fit normal distribution by quantiles on logit scale
+fitnorm <- function(lwr, upr, delta = 1e-3, root = 2){
+  # fit normal distribution such that
+  ## mu = logit(midpt)
+  ## Pr(Y < logit(lwr)) = .025
+  logit <- function(p) log(p / (1-p))
+
+  if(lwr == 0) lwr <- lwr + delta
+  if(upr == 1) upr <- upr - delta
+  
+  # precalc quantities
+  midpt <- (lwr + upr)/2
+  mu <- logit(midpt)
+  
+  f <- function(gamma){
+    pnorm(logit(upr), mu, abs(mu)^(1/root) * exp(gamma)) - pnorm(logit(lwr), mu, abs(mu)^(1/root) * exp(gamma)) - .95
+  }
+  root <- uniroot(f, c(-10, 10))
+  return(c(mu, exp(root$root)))
+}
+
+# plot it
+plot_mapping <- function(delta, k){
+  if(length(k) == 1){
+    # get probabilities
+    p <- seq(0.001, .999, by = .001)
+    logitp <- log(p / (1 - p)) 
+    mat <- matrix(NA, length(logitp), nrow(daub))
+    for(j in 1:ncol(mat)){
+      params <- unname(fitnorm(unlist(daub[j,2]), unlist(daub[j,3]), delta = delta, root = k))
+      mat[,j] <- dnorm(
+        logitp, 
+        params[1],
+        params[2]
+      )
+    }
+    
+    # create plot
+    tibble(
+      logitp = logitp
+    ) %>%
+      bind_cols(., as_tibble(mat)) %>%
+      rename(
+        class1 = 2, class2 = 3, class3 = 4,
+        class4 = 5, class5 = 6, class6 = 7
+      ) %>%
+      pivot_longer(
+        class1:class6, 
+        names_to = "class",
+        values_to = "density"
+      ) %>%
+      mutate(
+        density = ifelse(density < 1e-6, NA, density)
+      ) %>%
+      mutate(root = paste0("root = ", k)) %>%
+      na.omit %>%
+      ggplot() +
+      geom_line(aes(x = logitp, y = density, group = class, col = class)) +
+      theme_bw() +
+      facet_wrap(~ root)
+  } else{
+    out <- list()
+    for(iter in 1:length(k)){
+      # get probabilities
+      p <- seq(0.001, .999, by = .001)
+      logitp <- log(p / (1 - p)) 
+      mat <- matrix(NA, length(logitp), nrow(daub))
+      for(j in 1:ncol(mat)){
+        params <- unname(fitnorm(unlist(daub[j,2]), unlist(daub[j,3]), delta = delta, root = k[iter]))
+        mat[,j] <- dnorm(
+          logitp, 
+          params[1],
+          params[2]
+        )
+      }
+      
+      # create plot
+      out[[iter]] <- tibble(
+        logitp = logitp
+      ) %>%
+        bind_cols(., as_tibble(mat)) %>%
+        rename(
+          class1 = 2, class2 = 3, class3 = 4,
+          class4 = 5, class5 = 6, class6 = 7
+        ) %>%
+        pivot_longer(
+          class1:class6, 
+          names_to = "class",
+          values_to = "density"
+        ) %>%
+        mutate(
+          density = ifelse(density < 1e-6, NA, density)
+        ) %>%
+        mutate(root = paste0("root = ", k[iter])) %>%
+        na.omit
+    }
+    
+    do.call("rbind", out) %>%
+      ggplot() +
+      geom_line(
+        aes(
+          x = logitp, y = density, 
+          group = class, col = class
+        )
+      ) +
+      theme_bw() +
+      facet_wrap(~ root, nrow = length(k))
+  }
+}
+plot_mapping(1e-3, c(2,3))
+```
+
+# Simulated data
+
+```{r}
+n = 100
+seed = 1
+beta = c(0, 1)
+p = .5
+nregions = 4
+sim_gp_predict_counts <- function(n = 100, seed = 1, beta = c(0,1), p = .5, nregions = 4){
+  # housekeeping
+  if((sqrt(n) %% 1) != 0) stop("n should be a perfect square")
+  if(n %% 4 != 0) stop("n should be divisible by nregions")
+  set.seed(seed)
+  sigma = 1
+  phi = 3
+  
+  # create grid
+  sfc <- st_sfc(st_polygon(list(rbind(c(0,0), c(sqrt(n),0), c(sqrt(n),sqrt(n)), c(0,0)))))
+  grid <- st_as_sf(st_make_grid(sfc, cellsize = 1, square = TRUE)) %>% as_tibble
+  names(grid) <- "geometry"
+  rm(sfc)
+  
+  # add centroid
+  bind_cols(
+    grid, 
+    grid %>% st_as_sf %>% st_centroid %>% st_coordinates
+  ) %>%
+    rename(x_centroid = 2, y_centroid = 3)
+  
+  
+  # spatial random effects
+  coords <- grid %>%
+    st_as_sf %>%
+    st_centroid %>%
+    st_coordinates
+  dist_mat <- coords %>%
+    as.matrix %>%
+    dist %>% as.matrix
+
+  # generate spatial covariate
+  Sigma <- sigma^2 * exp(-dist_mat^2 / (2*phi^2)) + diag(1e-1, dim(dist_mat))
+  grid$x <- c(mvtnorm::rmvnorm(1, rep(0, n), Sigma))
+  
+  # generate spatially indexed random effects
+  
+  
+  # generate z states
+  
+  linpred <- beta[1] + beta[2]*grid$x
+  grid$pi <- exp(linpred) / (1 + exp(linpred))
+  grid$z <- rbinom(nrow(grid), 1, grid$pi)
+  
+  # generate counts using shared spatial random effect - negbin
+  p <- length(beta)
+  X <- matrix(c(rep(1, n), runif(n*(p-1))), n, p)
+  pi <- exp(cbind(X, grid$eta) %*% c(beta, alpha)) / (1 + exp(cbind(X, grid$eta) %*% c(beta, alpha)))
+  # pi <- 1 / (1 + exp(cbind(X, grid$eta) %*% c(beta, 1))) # force alpha = 1
+  grid$c <- rnbinom(nrow(grid), rep(nbdisp, nrow(grid)), 1 - pi)
+  tmp <- as_tibble(X[,2:p]); names(tmp) <- paste0("x", 1:(p-1))
+  grid <- bind_cols(grid, tmp)
+  grid$nb_pi = 1 - pi
+  
+  # generate counts using shared spatial random effect - normal
+  # p <- length(beta)
+  # X <- matrix(c(rep(1, n), runif(n*(p-1))), n, p)
+  # # mu <- cbind(X, grid$eta) %*% c(beta, alpha)
+  # mu <- cbind(X, grid$eta) %*% c(beta, 1)
+  # grid$c <- rnorm(nrow(grid), c(mu), rep(1, nrow(grid)))
+  # tmp <- as_tibble(X[,2:p]); names(tmp) <- paste0("x", 1:(p-1))
+  # grid <- bind_cols(grid, tmp)
+  
+  
+  # mask observations
+  if(colocate == "none"){
+    grid2 <- grid %>%
+      mutate(obs_y_ind = rbinom(n, 1, obs_y_prop))
+    
+    if((obs_c_prop * n) >= (n - (obs_y_prop * n))){
+      grid2$obs_c_ind <- ifelse(grid2$obs_y_ind == 1, 0, 1)
+    } else{
+      grid2$obs_c_ind  <- rep(0, n)
+      grid2$obs_c_ind[which(grid2$obs_y_ind == 0)] <- rbinom(sum(grid2$obs_y_ind == 0), 1, obs_c_prop)
+    }
+  } else if(colocate == "all"){
+    grid2 <- grid %>%
+      mutate(obs_y_ind = rbinom(n, 1, obs_y_prop))
+    
+    if((obs_c_prop * n) >= (obs_y_prop * n)){
+      grid2$obs_c_ind <- ifelse(grid2$obs_y_ind == 1, 1, 0)
+      grid2$obs_c_ind[which(grid2$obs_y_ind == 0)] <- rbinom(sum(grid2$obs_y_ind == 0), 1, (obs_c_prop - obs_y_prop))
+    } else{
+      grid2$obs_c_ind <- rep(0, n)
+      grid2$obs_c_ind[which(grid2$obs_y_ind == 1)] <-  rbinom(sum(grid2$obs_y_ind == 1), 1, obs_c_prop)
+    }
+    
+  } else{
+    grid2 <- grid %>%
+      mutate(obs_y_ind = rbinom(n, 1, obs_y_prop)) %>%
+      mutate(obs_c_ind = rbinom(n, 1, obs_c_prop))
+  }
+  
+  grid2 <- grid2 %>%
+    mutate(obs_y = ifelse(obs_y_ind == 0, NA, y), obs_c = ifelse(obs_c_ind == 0, NA, c))
+  
+  out <- list(
+    df = grid2,
+    params = list(
+      phi = phi, sigma = sigma, alpha0 = alpha0, alpha = alpha, beta = beta, nbdisp = nbdisp
+    ),
+    dist_mat = dist_mat,
+    coords = coords
+  )
+  
+  return(out)
+}
+```
+
+# Model estimation
+
+To improve computational efficiency, we write the sampler for this model by hand. Leveraging the data augmentation strategy of @polson2013, Gibbs draws are available for all parameters in the model. 
+
+## Polya-gamma data augmentation
+
+For binomial and negative binomial sampling models, we implement the Polya-gamma data augmentation strategy of @polson2013. This strategy introduces auxiliary Polya-gamma distributed random variables to each likelihood to afford conditionally Gaussian posterior distributions, allowing for Gibbs draws of regression coefficients. This data augmentation is relevant for sampling $\alpha, \beta$, and $\eta$. 
+
+## Sampling $\boldsymbol{z}^{(\psi)}$
+
+We let $\boldsymbol{z}^{(\psi)}$ denote the vector of partially observed occupancy states and $y_{ij}$ denote the observed response during visit $j$ to site $i$. From @dorazio2018, the full conditional distribution of $\boldsymbol{z}^{(\psi)}$ is,
+\[
+Z_i^{(\psi)} \sim 
+\begin{cases}
+\text{Bernoulli}(1) & \text{if} \sum_{j=1}^{J_i} y_{ij} > 0 \\
+\text{Bernoulli}\left(\frac{\psi_i\prod_{j=1}^{J_i} (1 - p_{ij})}{1 -\psi_i + \psi_i\prod_{j=1}^{J_i} (1 - p_{ij})}\right) & \text{if} \sum_{j=1}^{J_i} y_{ij} = 0
+\end{cases}
+\]
+
+## Sampling $\boldsymbol{\omega}^{(\beta)}$
+
+Let $\omega^{(\beta)}_i \sim \text{PG}(1, 0)$. Then,
+\[
+z_i = \frac{1}{\omega^{(\beta)}_i}\left(z^{(\psi)}_i - \frac{1}{2}\right) \sim \mathcal{N}\left(\boldsymbol{x}_i'\boldsymbol{\beta} + \eta_i, \frac{1}{\omega_i} \right).
+\]
+where $z^{(\psi)}_i$ is the latent occupancy state for site $i$. See @polson2013 for more detail. Equivalently, let $\boldsymbol{\Omega}_{(\beta)} = \text{diag}(\omega^{(\beta)}_1, \dots, \omega^{(\beta)}_n)$. Then,
+\[
+\boldsymbol{z} \sim \mathcal{N}\left(X\boldsymbol{\beta}+ \boldsymbol{\eta}, \boldsymbol{\Omega}_{(\beta)}^{-1}\right)
+\]
+From @polson2013, the full conditional distribution of $\omega^{(\beta)}_i$ is
+\[
+\begin{split}
+\omega^{(\beta)}_i | \cdot \sim \text{PG}(1, \boldsymbol{x}_i'\boldsymbol{\beta} + \eta_i)
+\end{split}
+\]
+
+## Sampling $\boldsymbol{\beta}$
+
+Let $\boldsymbol{\beta} \sim \mathcal{N}(\boldsymbol{\mu}_{0, \beta}, \boldsymbol{\Sigma}_{0, \beta})$.Then,
+\[
+\begin{split}
+\boldsymbol{\beta} | \cdot &\sim \mathcal{N}(\boldsymbol{m}, \boldsymbol{V}) \\
+\boldsymbol{V} &= \left(\boldsymbol{X}^T \boldsymbol{\Omega}_{(\beta)} \boldsymbol{X} +  \boldsymbol{\Sigma}^{-1}_{0, \beta}\right)^{-1} \\
+\boldsymbol{m} &= \boldsymbol{V} \left(\boldsymbol{X}^T \boldsymbol{\Omega}_{(\beta)} (\boldsymbol{z} - \boldsymbol{\eta}) + \boldsymbol{\Sigma}^{-1}_{0, \beta}\boldsymbol{\mu}_{0, \beta} \right)
+\end{split}
+\]
+
+## Sampling $\boldsymbol{\eta}$
+
+Let $\boldsymbol{\eta} \sim \mathcal{N}(\boldsymbol{\mu}_{0, \eta}, \boldsymbol{\Sigma}_{0, \eta})$. Note that $\{\boldsymbol{\mu}_{0, \eta}, \boldsymbol{\Sigma}_{0, \eta}\}$ are informed by the expert elicitation! Then,
+\[
+\begin{split}
+\boldsymbol{\eta} | \cdot &\sim \mathcal{N}(\boldsymbol{m}, \boldsymbol{V}) \\
+\boldsymbol{V} &= \left(\boldsymbol{\Omega}_{(\beta)} + \boldsymbol{\Sigma}_{0, \eta}^{-1}\right)^{-1} \\
+\boldsymbol{m} &= \boldsymbol{V} \left(\boldsymbol{\Omega}_{(\beta)} (\boldsymbol{z} - \boldsymbol{X}\boldsymbol{\beta})\right)
+\end{split}
+\]
+
+
+
+
