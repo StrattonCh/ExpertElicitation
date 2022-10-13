@@ -53,7 +53,7 @@ knitr::opts_chunk$set(
 
 
 # packages
-packs <- c("dplyr", "htmltools", "ggplot2", "sf", "readr", "parallel", "xtable", "tidyr", "stringr", "tidyverse", "ggalluvial", "lubridate", "ggnewscale")
+packs <- c("dplyr", "htmltools", "ggplot2", "sf", "readr", "parallel", "xtable", "tidyr", "stringr", "ggalluvial", "lubridate", "coda", "rstan",  "tidyverse")
 sapply(packs, require, character.only = T)
 rm(packs)
 options(tidyverse.quiet = TRUE)
@@ -63,6 +63,68 @@ options(tidyverse.quiet = TRUE)
 
 # stan settings
 options(mc.cores = parallel::detectCores() - 1)
+rstan_options(auto_write = TRUE)
+
+# useful fuctions
+nimble_summary <- function(fit, warmup = nrow(fit[[1]])/2, thin = 1){
+  # convert to coda for normal summary
+  fit_warmup <- lapply(fit, function(x) x[(warmup+1):nrow(x),])
+  coda_samples <- as.mcmc.list(lapply(fit_warmup, function(x) as.mcmc(
+    x, start = warmup+1, end = nrow(fit), thin = thin
+  )))
+  
+  sum <- summary(coda_samples)
+  params <- dimnames(sum$statistics)[[1]]
+  tmp_sum <- cbind(sum$statistics, sum$quantiles)
+  
+  # get r hat / n_eff
+  mat <- matrix(NA, nrow = nrow(tmp_sum), ncol = 3)
+  colnames(mat) <- c("Rhat", "ess_bulk", "ess_tail")
+  for(i in 1:nrow(tmp_sum)){
+    tmp <- sapply(fit, function(x) x[,i])
+    mat[i,] <- c(Rhat(tmp), ess_bulk(tmp), ess_tail(tmp))
+  }
+  
+  # out 
+  out <- cbind(tmp_sum, mat)
+  return(out)
+}
+trace_plot <- function(samples, which = c("sigma")){
+  niter <- dim(samples[[1]])[1]
+  nchains <- length(samples)
+  params <- colnames(samples[[1]])
+  
+  combined_samples <- do.call("rbind", samples)
+  combined_samples <- combined_samples %>%
+    as_tibble %>%
+    mutate(iter = rep(1:niter, nchains), chain = factor(rep(1:nchains, each = niter))) %>%
+    dplyr::select(chain, iter, everything()) %>%
+    pivot_longer(cols = -c(1:2), names_to = "param", values_to = "trace")
+  
+  if(all(is.numeric(which))) which <- unique(combined_samples$param)[which]
+  
+  p <- combined_samples %>%
+    filter(param %in% which) %>%
+    ggplot() + 
+    geom_line(aes(x = iter, y = trace, col = chain, group = chain)) +
+    theme_bw() +
+    facet_wrap(~ param, scales = "free_y")
+  
+  return(p)
+  
+}
+readJMCMC <- function(dir){
+  tmp <- readRDS(dir)
+  
+  out <- list()
+  for(i in 1:length(tmp)){
+    tmp2 <- tmp[[i]][["samples"]]
+    colnames(tmp2) <- tmp[[i]][["names"]]
+    out[[i]] <- tmp2
+  }
+  
+  return(out)
+}
 ```
 
 # Introduction
@@ -82,7 +144,7 @@ where $\text{logit}(\psi_i) = x_i'\beta$ and $\text{logit}(p_{ij}) = W\alpha$.
 
 ## Addition of random effects
 
-To accommodate extra sources of variation not captured by $X$, we include spatial random effects for each site. 
+To accommodate extra sources of variation not captured by $X$, we include spatially indexed random effects for each site. 
 \[
 \begin{split}
 Z_i &\sim \text{Bernoulli}(\psi_i) \\
@@ -90,6 +152,16 @@ y_i &\sim \text{Bernoulli}(z_i p_{ij})
 \end{split}
 \]
 where $\text{logit}(\psi_i) = x_i'\beta + \eta_i$ and $\text{logit}(p_{ij}) = W\alpha$.
+
+Additional structure may be imposed of $\boldsymbol{\eta}$. For example, one could draw $\boldsymbol{\eta}$ from a Gaussian process with spatial covariance structure. Alternatively, $\boldsymbol{\eta}$ may be drawn from a hierarchical normal distribution. 
+\[
+\eta_i \sim N(\theta_{c_i}, \sigma_{c_i}) 
+\]
+where $\boldsymbol{c}$ is a vector of indicators denoting the group associated with observation $i$. Then,
+\[
+\boldsymbol{\theta} \sim \mathcal{N}(\boldsymbol{\mu}, \boldsymbol{\Sigma})
+\]
+This is the structure we exploit for the expert elicitation problem, allowing expert knowledge to inform $\{\boldsymbol{\mu}, \boldsymbol{\Sigma}\}$.
 
 # Expert response structure
 
@@ -239,129 +311,7 @@ plot_mapping <- function(delta, k){
 plot_mapping(1e-3, c(2,3))
 ```
 
-# Simulated data
-
-```{r}
-n = 100
-seed = 1
-beta = c(0, 1)
-p = .5
-nregions = 4
-sim_gp_predict_counts <- function(n = 100, seed = 1, beta = c(0,1), p = .5, nregions = 4){
-  # housekeeping
-  if((sqrt(n) %% 1) != 0) stop("n should be a perfect square")
-  if((sqrt(nregions) %% 1) != 0) stop("nregions should be a perfect square")
-  if(n %% 4 != 0) stop("n should be divisible by nregions")
-  set.seed(seed)
-  sigma = 1
-  phi = 3
-  
-  # create grid
-  sfc <- st_sfc(st_polygon(list(rbind(c(0,0), c(sqrt(n),0), c(sqrt(n),sqrt(n)), c(0,0)))))
-  grid <- st_as_sf(st_make_grid(sfc, cellsize = 1, square = TRUE)) %>% as_tibble
-  names(grid) <- "geometry"
-  rm(sfc)
-  
-  # add centroid
-  bind_cols(
-    grid, 
-    grid %>% st_as_sf %>% st_centroid %>% st_coordinates
-  ) %>%
-    rename(x_centroid = 2, y_centroid = 3) %>%
-    mutate(
-      group = case_when(
-        x_centroid <= seq(0, sqrt(n), sqrt(nregions)) 
-      )
-    )
-    
-  
-  
-  # spatial random effects
-  coords <- grid %>%
-    st_as_sf %>%
-    st_centroid %>%
-    st_coordinates
-  dist_mat <- coords %>%
-    as.matrix %>%
-    dist %>% as.matrix
-
-  # generate spatial covariate
-  Sigma <- sigma^2 * exp(-dist_mat^2 / (2*phi^2)) + diag(1e-1, dim(dist_mat))
-  grid$x <- c(mvtnorm::rmvnorm(1, rep(0, n), Sigma))
-  
-  # generate spatially indexed random effects
-  
-  
-  # generate z states
-  
-  linpred <- beta[1] + beta[2]*grid$x
-  grid$pi <- exp(linpred) / (1 + exp(linpred))
-  grid$z <- rbinom(nrow(grid), 1, grid$pi)
-  
-  # generate counts using shared spatial random effect - negbin
-  p <- length(beta)
-  X <- matrix(c(rep(1, n), runif(n*(p-1))), n, p)
-  pi <- exp(cbind(X, grid$eta) %*% c(beta, alpha)) / (1 + exp(cbind(X, grid$eta) %*% c(beta, alpha)))
-  # pi <- 1 / (1 + exp(cbind(X, grid$eta) %*% c(beta, 1))) # force alpha = 1
-  grid$c <- rnbinom(nrow(grid), rep(nbdisp, nrow(grid)), 1 - pi)
-  tmp <- as_tibble(X[,2:p]); names(tmp) <- paste0("x", 1:(p-1))
-  grid <- bind_cols(grid, tmp)
-  grid$nb_pi = 1 - pi
-  
-  # generate counts using shared spatial random effect - normal
-  # p <- length(beta)
-  # X <- matrix(c(rep(1, n), runif(n*(p-1))), n, p)
-  # # mu <- cbind(X, grid$eta) %*% c(beta, alpha)
-  # mu <- cbind(X, grid$eta) %*% c(beta, 1)
-  # grid$c <- rnorm(nrow(grid), c(mu), rep(1, nrow(grid)))
-  # tmp <- as_tibble(X[,2:p]); names(tmp) <- paste0("x", 1:(p-1))
-  # grid <- bind_cols(grid, tmp)
-  
-  
-  # mask observations
-  if(colocate == "none"){
-    grid2 <- grid %>%
-      mutate(obs_y_ind = rbinom(n, 1, obs_y_prop))
-    
-    if((obs_c_prop * n) >= (n - (obs_y_prop * n))){
-      grid2$obs_c_ind <- ifelse(grid2$obs_y_ind == 1, 0, 1)
-    } else{
-      grid2$obs_c_ind  <- rep(0, n)
-      grid2$obs_c_ind[which(grid2$obs_y_ind == 0)] <- rbinom(sum(grid2$obs_y_ind == 0), 1, obs_c_prop)
-    }
-  } else if(colocate == "all"){
-    grid2 <- grid %>%
-      mutate(obs_y_ind = rbinom(n, 1, obs_y_prop))
-    
-    if((obs_c_prop * n) >= (obs_y_prop * n)){
-      grid2$obs_c_ind <- ifelse(grid2$obs_y_ind == 1, 1, 0)
-      grid2$obs_c_ind[which(grid2$obs_y_ind == 0)] <- rbinom(sum(grid2$obs_y_ind == 0), 1, (obs_c_prop - obs_y_prop))
-    } else{
-      grid2$obs_c_ind <- rep(0, n)
-      grid2$obs_c_ind[which(grid2$obs_y_ind == 1)] <-  rbinom(sum(grid2$obs_y_ind == 1), 1, obs_c_prop)
-    }
-    
-  } else{
-    grid2 <- grid %>%
-      mutate(obs_y_ind = rbinom(n, 1, obs_y_prop)) %>%
-      mutate(obs_c_ind = rbinom(n, 1, obs_c_prop))
-  }
-  
-  grid2 <- grid2 %>%
-    mutate(obs_y = ifelse(obs_y_ind == 0, NA, y), obs_c = ifelse(obs_c_ind == 0, NA, c))
-  
-  out <- list(
-    df = grid2,
-    params = list(
-      phi = phi, sigma = sigma, alpha0 = alpha0, alpha = alpha, beta = beta, nbdisp = nbdisp
-    ),
-    dist_mat = dist_mat,
-    coords = coords
-  )
-  
-  return(out)
-}
-```
+We then let $\boldsymbol{\mu} = \{\mu_1, \dots, \mu_6\}$ and $\boldsymbol{\Sigma} = \text{diag}(\sigma_1, \dots, \sigma_6)$.
 
 # Model estimation
 
@@ -410,17 +360,649 @@ Let $\boldsymbol{\beta} \sim \mathcal{N}(\boldsymbol{\mu}_{0, \beta}, \boldsymbo
 \end{split}
 \]
 
+Proof (omitting boldface text):
+
+Let $z^* = z - \eta$
+\[
+\begin{split}
+p(\beta | z^*, \omega^{(\beta)}) &\propto p(z^* | \beta, \omega^{(\beta)}) p(\beta) \\
+&\propto \exp\left\{-\frac{1}{2}(z^* - X\beta)^T \Omega_{(\beta)}(z^* - X\beta) \right\} \exp\left\{-\frac{1}{2}(\beta - \mu_{0, \beta})^T \Sigma^{-1}_{(0,\beta)}(\beta - \mu_{0, \beta}) \right\}  \\
+&\propto \exp \left\{-\frac{1}{2} \left(\beta^T (X^T \Omega_{(\beta)} X + \Sigma^{-1}_{0, \beta})  \beta - 2\beta^T( X^T \Omega_{(\beta)} z^* + \Sigma^{-1}_{0, \beta}\mu_{0, \beta} )\right) \right\}
+\end{split}
+\]
+
 ## Sampling $\boldsymbol{\eta}$
 
-Let $\boldsymbol{\eta} \sim \mathcal{N}(\boldsymbol{\mu}_{0, \eta}, \boldsymbol{\Sigma}_{0, \eta})$. Note that $\{\boldsymbol{\mu}_{0, \eta}, \boldsymbol{\Sigma}_{0, \eta}\}$ are informed by the expert elicitation! Then,
+Let $\boldsymbol{\eta} \sim \mathcal{N}(\boldsymbol{C}\boldsymbol{\theta}, \tau^2\mathcal{I})$. Where $\boldsymbol{C}$ is an indicator matrix attributing each location to a group based on expert opinion. Then,
 \[
 \begin{split}
 \boldsymbol{\eta} | \cdot &\sim \mathcal{N}(\boldsymbol{m}, \boldsymbol{V}) \\
-\boldsymbol{V} &= \left(\boldsymbol{\Omega}_{(\beta)} + \boldsymbol{\Sigma}_{0, \eta}^{-1}\right)^{-1} \\
-\boldsymbol{m} &= \boldsymbol{V} \left(\boldsymbol{\Omega}_{(\beta)} (\boldsymbol{z} - \boldsymbol{X}\boldsymbol{\beta})\right)
+\boldsymbol{V} &= \left(\boldsymbol{\Omega}_{(\beta)} + \frac{1}{\tau^2} \boldsymbol{\mathcal{I}}\right)^{-1} \\
+\boldsymbol{m} &= \boldsymbol{V} \left(\boldsymbol{\Omega}_{(\beta)} (\boldsymbol{z} - \boldsymbol{X}\boldsymbol{\beta}) + \frac{1}{\tau^2}\boldsymbol{C}\boldsymbol{\theta}\right)
+\end{split}
+\]
+
+Proof (omitting boldface):
+
+Let $z^* = z - X\beta$. Then,
+\[
+\begin{split}
+p(\eta | z^*, \omega^{(\beta)}) &\propto p(z^* | \eta, \omega^{(\beta)}) p(\eta) \\
+&\propto \exp\left\{-\frac{1}{2}(z^* - \eta)^T \Omega_{(\beta)}(z^* - \eta) \right\} \exp\left\{-\frac{1}{2}(\eta - C\theta)^T \frac{1}{\tau^2} \mathcal{I}(\eta - C\theta) \right\}  \\
+&\propto \exp \left\{-\frac{1}{2} \left(\eta^T (\Omega_{(\beta)} + \frac{1}{\tau^2} \mathcal{I}) \eta - 2\eta^T (\Omega_{(\beta)}z^* + \frac{1}{\tau^2} C\theta)\right) \right\}
+\end{split}
+\]
+
+## Sampling $\boldsymbol{\theta}$
+
+Let $\boldsymbol{\theta} \sim \mathcal{N}(\boldsymbol{\mu}, \boldsymbol{\Sigma})$. Note that the expert elicitation informs $\{\boldsymbol{\mu}, \boldsymbol{\Sigma}\}$! The full conditional posterior distribution of $\boldsymbol{\mu}$ is
+\[
+\begin{split}
+\boldsymbol{\theta} | \cdot &\sim \mathcal{N}(\boldsymbol{m}, \boldsymbol{V}) \\
+\boldsymbol{V} &= \left(\frac{1}{\tau^2}\boldsymbol{C}^T\boldsymbol{C} + \boldsymbol{\Sigma}^{-1}\right)^{-1} \\
+\boldsymbol{m} &= \boldsymbol{V} \left(\frac{1}{\tau^2}\boldsymbol{C}^T \boldsymbol{\eta} + \boldsymbol{\Sigma}^{-1} \boldsymbol{\mu}\right)
+\end{split}
+\]
+
+Proof (omitting boldface):
+\[
+\begin{split}
+p(\theta | \eta, \tau) &\propto p(\eta | \theta, \tau) p(\theta) \\
+&\propto\exp\left\{-\frac{1}{2}(\eta - C\theta)^T \frac{1}{\tau^2} \mathcal{I}(\eta - C\theta) \right\}  \exp\left\{-\frac{1}{2}(\theta - \mu)^T\Sigma^{-1}(\theta - \mu) \right\} \\
+&\propto \exp \left\{-\frac{1}{2} \left(\theta^T (\frac{1}{\tau^2} C^TC + \Sigma^{-1}) \theta - 2\theta^T (\frac{1}{\tau^2}C^T \eta + \Sigma^{-1}\mu)\right) \right\}
+\end{split}
+\]
+
+## Sampling $\tau$
+
+__Consider $\tau_{c_i}$?__
+
+Let $\tau^2 \sim \text{Inverse-Gamma}(a_0, b_0)$. Then,
+\[
+\begin{split}
+\tau^2 | \cdot &\sim \text{Inverse-Gamma}(a, b) \\
+a &= a_0 + \frac{n}{2} \\
+b &= b_0 + \frac{1}{2}(\boldsymbol{\eta} - \boldsymbol{C}\boldsymbol{\theta})^T(\boldsymbol{\eta} - \boldsymbol{C}\boldsymbol{\theta})
 \end{split}
 \]
 
 
 
+Proof (omitting boldface):
+\[
+\begin{split}
+p(\tau^2 | \eta, \theta) &\propto p(\eta | \tau^2, \theta) p(\tau^2) \\
+&\propto (\tau^2)^{-n/2} \exp\left\{-\frac{1}{2}(\eta - C\theta)^T \frac{1}{\tau^2} \mathcal{I}(\eta - C\theta)\right\} (\tau^2)^{-a_0 - 1} \exp\left(-\frac{b_0}{\tau^2}\right)
+\end{split}
+\]
+
+
+# Synthetic data scenarios
+
+## Idyllic case - normal response
+
+### Sampling model
+
+We first imagine the data arising directly from the specified model. That is, 
+\[
+\begin{split}
+y_i &\sim \text{Normal}(x_i'\beta + \eta_i, \tau^2)
+\end{split}
+\]
+We assume that $\eta_i \sim N(\mu_{c_i}, \sigma_{c_i})$, where $c_i$ is an indicator vector denoting distinct regions assigned by the expert. For now, we assume that $p$ is constant (to speed up simulated studies). 
+
+### Simulated data
+
+```{r}
+# functions to simulate data
+fitnorm <- function(lwr, upr, delta = 1e-3, root = 2){
+  # fit normal distribution such that
+  ## mu = logit(midpt)
+  ## Pr(Y < logit(lwr)) = .025
+  logit <- function(p) log(p / (1-p))
+  
+  if(lwr == 0) lwr <- lwr + delta
+  if(upr == 1) upr <- upr - delta
+  
+  # precalc quantities
+  midpt <- (lwr + upr)/2
+  mu <- logit(midpt)
+  
+  f <- function(gamma){
+    pnorm(logit(upr), mu, abs(mu)^(1/root) * exp(gamma)) - pnorm(logit(lwr), mu, abs(mu)^(1/root) * exp(gamma)) - .95
+  }
+  root <- uniroot(f, c(-10, 10))
+  return(c(mu, exp(root$root)))
+}
+split_poly <- function(grid, n_areas){
+  # combine
+  sf_poly = grid %>% st_as_sf %>% st_union 
+  
+  # create random points
+  points_rnd <- st_sample(sf_poly, size = 10000)
+  
+  # k-means clustering
+  points <- do.call(rbind, st_geometry(points_rnd)) %>%
+    as_tibble() %>%
+    setNames(c("lon","lat"))
+  k_means <- kmeans(points, centers = n_areas)
+  
+  # create voronoi polygons
+  voronoi_polys <- st_voronoi(
+    st_as_sf(
+      k_means$centers %>% 
+        as_tibble, 
+      coords = c("lon", "lat")
+    ) %>% st_union,
+    sf_poly
+  )
+  
+  # convert to multipolygons
+  tmp <- st_cast(voronoi_polys) %>%
+    st_as_sf()
+  
+  group <- matrix(NA, nrow(grid), 1)
+  coverby <- st_covered_by(grid %>% st_as_sf, tmp %>% st_buffer(.5))
+  for(i in 1:nrow(grid)){
+    if(length(coverby[[i]]) == 0){
+      NULL
+    } else{
+      group[i] <- coverby[[i]]  
+    }
+  }
+  out <- grid
+  out$group <- c(group)
+  
+  out %>%
+    st_as_sf %>% 
+    ggplot() + 
+    geom_sf(aes(fill = group))
+  return(out)
+}
+sim_idyllic <- function(n = 100, seed = 1, beta = c(0,1), tau = 1, tau_eta = 1, nregions = 4, root = 3){
+  # housekeeping
+  if((sqrt(n) %% 1) != 0) stop("n should be a perfect square")
+  set.seed(seed)
+  sigma = 1
+  phi = 3
+  
+  # bring along the daub classes
+  logit <- function(p) log(p / (1-p))
+  daub <- round(tibble(
+    `Class` = 1:6,
+    `Lower` = c(0, .05, .25, .50, .75, .95),
+    `Upper` = c(.05, .25, .50, .75, .95, 1)
+  ) %>%
+    mutate(`Midpoint` = (Lower + Upper)/2) %>%
+    mutate(
+      logitL = logit(Lower+.01), 
+      logitM = logit(Midpoint),
+      logitU = logit(Upper-.01)
+    ), 2)
+  
+  distr_tbl <- t(apply(
+    daub %>% dplyr::select(Lower, Upper) %>% as.matrix,
+    1, 
+    function(x) fitnorm(x[1], x[2], delta = 1e-3, root = root)
+  )) %>% unname
+  distr_tbl <- rbind(
+    distr_tbl,
+    c(0, 1)
+  )
+  
+  # create grid
+  sfc <- st_sfc(st_polygon(list(rbind(c(0,0), c(sqrt(n),0), c(sqrt(n),sqrt(n)), c(0,0)))))
+  grid <- st_as_sf(st_make_grid(sfc, cellsize = 1, square = TRUE)) %>% as_tibble
+  names(grid) <- "geometry"
+  rm(sfc)
+  
+  # add centroid and assign group
+  grid <- split_poly(grid, nregions)
+  
+  # assign normal distributions to each region
+  if(nregions != 6) stop("must have 6 regions for now")
+  grid$group <- with(grid, ifelse(is.na(group), 7, group))
+
+  # spatial random effects
+  coords <- suppressWarnings({grid %>%
+      st_as_sf %>%
+      st_centroid %>%
+      st_coordinates})
+  dist_mat <- coords %>%
+    as.matrix %>%
+    dist %>% as.matrix
+  
+  # generate spatial covariate
+  Sigma <- sigma^2 * exp(-dist_mat^2 / (2*phi^2)) + diag(1e-1, dim(dist_mat))
+  grid$x <- c(mvtnorm::rmvnorm(1, rep(0, n), Sigma))
+  
+  # generate spatially indexed random effects
+  theta <- apply(distr_tbl, 1, function(x) rnorm(1, x[1], x[2]))
+  grid$theta <- sapply(grid$group, function(x) theta[x])
+  grid$eta <- rnorm(nrow(grid), grid$theta, tau_eta)
+  
+  # generate z states
+  grid$linpred <- beta[1] + beta[2]*grid$x + grid$eta
+  grid$y <- rnorm(nrow(grid), grid$linpred, tau)
+
+  # generate observed detections
+  out <- list(
+    df = grid,
+    params = list(
+      beta = beta, eta = grid$eta, theta = c(theta, 0), tau = tau, tau_eta = tau_eta
+    ),
+    expert_dists = distr_tbl
+  )
+  
+  return(out)
+}
+
+# sim data
+sim_dat <- sim_idyllic(
+  n = 20^2, 
+  seed = 2,
+  nregions = 6,
+  beta = c(0, 1)
+)
+
+# plot
+p1 <- sim_dat$df %>%
+  st_as_sf() %>%
+  ggplot() + 
+  geom_sf(aes(fill = x)) +
+  theme_bw()
+p2 <- sim_dat$df %>%
+  st_as_sf() %>%
+  ggplot() + 
+  geom_sf(aes(fill = eta)) +
+  theme_bw()
+p3 <- sim_dat$df %>%
+  st_as_sf() %>%
+  ggplot() + 
+  geom_sf(aes(fill = theta)) +
+  theme_bw()
+p4 <- sim_dat$df %>%
+  st_as_sf() %>%
+  ggplot() + 
+  geom_sf(aes(fill = y)) +
+  theme_bw()
+
+gridExtra::grid.arrange(p1, p2, p3, p4, nrow = 2)
+```
+
+### Fit models
+
+We consider two different models:
+
+1) Standard occupancy ignoring spatially indexed random effects
+2) Standard occupancy including spatially indexed random effects with expert informed priors (assuming they're correct)
+
+```{r, eval = F}
+# compare to stan
+stan_fit <- stan(
+  file = "julia code/idyllic/stan_normal.stan",
+  data = list(
+    N = length(sim_dat$df$y),
+    J = 8,
+    y = sim_dat$df$y,
+    x = sim_dat$df$x,
+    K = 7,
+    group = sim_dat$df$group,
+    mu = sim_dat$expert_dists[,1],
+    sigma = sim_dat$expert_dists[,2]
+  ),
+  iter = 5000,
+  chains = 3,
+  pars = c("tau", "beta0", "beta1", "theta", "eta")
+)
+saveRDS(stan_fit, file = "julia code/idyllic/stan_fit_normal.rds")
+
+stan_fit <- readRDS("julia code/idyllic/stan_fit_normal.rds")
+summary(stan_fit)$summary[,c(1, 4, 8:10)] 
+```
+
+
+```{r, eval = F}
+# export data list to Julia
+data_list <- list(
+  y = sim_dat$df$y,
+  J = 8,
+  X = cbind(rep(1, nrow(sim_dat$df)), sim_dat$df$x),
+  C = model.matrix(~ factor(sim_dat$df$group,) - 1) %>% unname %>% as.matrix,
+  expert_means = sim_dat$expert_dists[,1],
+  expert_sds = sim_dat$expert_dists[,2]
+)
+saveRDS(data_list, "julia code/idyllic/data_list.rds")
+```
+
+```{r, eval = F}
+# load fitted model from Julia
+fit_parallel <- readJMCMC("julia code/idyllic/expert_hier_idyllic.rds")
+tmp <- nimble_summary(fit_parallel, warmup = 0)
+tmp[,c(1,5,9:11)] %>% head
+tmp[,c(1,5,9:11)] %>% tail
+trace_plot(fit_parallel, which = c("beta[1]", "beta[1]"))
+
+# prediction
+tbl1 <- tibble(
+  param = rownames(tmp),
+  mean = tmp[,1],
+  lwr = tmp[,5],
+  upr = tmp[,9],
+  truth = with(sim_dat$params, c(tau, beta, theta, eta, z, p))
+) %>%
+  mutate(
+    capture = factor(ifelse(truth <= upr & truth >= lwr, 1, 0))
+  )
+tbl1 %>%
+  filter(!grepl("z[[]", param)) %>%
+  filter(!grepl("eta[[]", param)) %>%
+  bind_rows(., tbl1 %>% filter(grepl("beta", param))) %>%
+  bind_rows(., tbl1 %>% filter(grepl("theta", param))) %>%
+  ggplot() +
+  geom_pointrange(aes(xmin = lwr, x = mean, xmax = upr, y = param, color = capture)) +
+  geom_point(aes(x = truth, y = param)) +
+  theme_bw()
+
+tbl1 %>%
+  filter(grepl("eta[[]", param)) %>%
+  filter(!grepl("beta[[]", param)) %>%
+  filter(!grepl("theta[[]", param)) %>%
+  ggplot() +
+  geom_pointrange(aes(xmin = lwr, x = mean, xmax = upr, y = param, color = capture)) +
+  geom_point(aes(x = truth, y = param)) +
+  theme_bw()
+
+tbl1 %>%
+  filter(grepl("etastar[[]", param)) %>%
+  ggplot() +
+  geom_pointrange(aes(xmin = lwr, x = mean, xmax = upr, y = param, color = capture)) +
+  geom_point(aes(x = truth, y = param)) +
+  theme_bw()
+```
+
+
+
+
+## Idyllic case
+
+### Sampling model
+
+We first imagine the data arising directly from the specified model. That is, 
+\[
+\begin{split}
+Z_i &\sim \text{Bernoulli}(\psi_i) \\
+y_i &\sim \text{Bernoulli}(z_i p_{ij})
+\end{split}
+\]
+where $\text{logit}(\psi_i) = x_i'\beta + \eta_i$ and $\text{logit}(p_{ij}) = W\alpha$. Furthermore, we assume that $\eta_i \sim N(\mu_{c_i}, \sigma_{c_i})$, where $c_i$ is an indicator vector denoting distinct regions assigned by the expert. For now, we assume that $p$ is constant (to speed up simulated studies). 
+
+### Simulated data
+
+```{r}
+# functions to simulate data
+fitnorm <- function(lwr, upr, delta = 1e-3, root = 2){
+  # fit normal distribution such that
+  ## mu = logit(midpt)
+  ## Pr(Y < logit(lwr)) = .025
+  logit <- function(p) log(p / (1-p))
+  
+  if(lwr == 0) lwr <- lwr + delta
+  if(upr == 1) upr <- upr - delta
+  
+  # precalc quantities
+  midpt <- (lwr + upr)/2
+  mu <- logit(midpt)
+  
+  f <- function(gamma){
+    pnorm(logit(upr), mu, abs(mu)^(1/root) * exp(gamma)) - pnorm(logit(lwr), mu, abs(mu)^(1/root) * exp(gamma)) - .95
+  }
+  root <- uniroot(f, c(-10, 10))
+  return(c(mu, exp(root$root)))
+}
+split_poly <- function(grid, n_areas){
+  # combine
+  sf_poly = grid %>% st_as_sf %>% st_union 
+  
+  # create random points
+  points_rnd <- st_sample(sf_poly, size = 10000)
+  
+  # k-means clustering
+  points <- do.call(rbind, st_geometry(points_rnd)) %>%
+    as_tibble() %>%
+    setNames(c("lon","lat"))
+  k_means <- kmeans(points, centers = n_areas)
+  
+  # create voronoi polygons
+  voronoi_polys <- st_voronoi(
+    st_as_sf(
+      k_means$centers %>% 
+        as_tibble, 
+      coords = c("lon", "lat")
+    ) %>% st_union,
+    sf_poly
+  )
+  
+  # convert to multipolygons
+  tmp <- st_cast(voronoi_polys) %>%
+    st_as_sf()
+  
+  group <- matrix(NA, nrow(grid), 1)
+  coverby <- st_covered_by(grid %>% st_as_sf, tmp %>% st_buffer(.5))
+  for(i in 1:nrow(grid)){
+    if(length(coverby[[i]]) == 0){
+      NULL
+    } else{
+      group[i] <- coverby[[i]]  
+    }
+  }
+  out <- grid
+  out$group <- c(group)
+  
+  out %>%
+    st_as_sf %>% 
+    ggplot() + 
+    geom_sf(aes(fill = group))
+  return(out)
+}
+sim_idyllic <- function(n = 100, J = 8, seed = 1, beta = c(0,1), p = .5, tau = 1, nregions = 4, root = 3){
+  # housekeeping
+  if((sqrt(n) %% 1) != 0) stop("n should be a perfect square")
+  set.seed(seed)
+  sigma = 1
+  phi = 3
+  
+  # bring along the daub classes
+  logit <- function(p) log(p / (1-p))
+  daub <- round(tibble(
+    `Class` = 1:6,
+    `Lower` = c(0, .05, .25, .50, .75, .95),
+    `Upper` = c(.05, .25, .50, .75, .95, 1)
+  ) %>%
+    mutate(`Midpoint` = (Lower + Upper)/2) %>%
+    mutate(
+      logitL = logit(Lower+.01), 
+      logitM = logit(Midpoint),
+      logitU = logit(Upper-.01)
+    ), 2)
+  
+  distr_tbl <- t(apply(
+    daub %>% dplyr::select(Lower, Upper) %>% as.matrix,
+    1, 
+    function(x) fitnorm(x[1], x[2], delta = 1e-3, root = root)
+  )) %>% unname
+  distr_tbl <- rbind(
+    distr_tbl,
+    c(0, 1)
+  )
+  
+  # create grid
+  sfc <- st_sfc(st_polygon(list(rbind(c(0,0), c(sqrt(n),0), c(sqrt(n),sqrt(n)), c(0,0)))))
+  grid <- st_as_sf(st_make_grid(sfc, cellsize = 1, square = TRUE)) %>% as_tibble
+  names(grid) <- "geometry"
+  rm(sfc)
+  
+  # add centroid and assign group
+  grid <- split_poly(grid, nregions)
+  
+  # assign normal distributions to each region
+  if(nregions != 6) stop("must have 6 regions for now")
+  grid$group <- with(grid, ifelse(is.na(group), 7, group))
+  
+  # spatial random effects
+  coords <- suppressWarnings({grid %>%
+      st_as_sf %>%
+      st_centroid %>%
+      st_coordinates})
+  dist_mat <- coords %>%
+    as.matrix %>%
+    dist %>% as.matrix
+  
+  # generate spatial covariate
+  Sigma <- sigma^2 * exp(-dist_mat^2 / (2*phi^2)) + diag(1e-1, dim(dist_mat))
+  grid$x <- c(mvtnorm::rmvnorm(1, rep(0, n), Sigma))
+  
+  # generate spatially indexed random effects
+  theta <- apply(distr_tbl, 1, function(x) rnorm(1, x[1], x[2]))
+  grid$theta <- sapply(grid$group, function(x) theta[x])
+  grid$eta <- rnorm(nrow(grid), grid$theta, tau)
+  
+  # generate z states
+  grid$linpred <- beta[1] + beta[2]*grid$x + grid$eta
+  grid$pi <- exp(grid$linpred) / (1 + exp(grid$linpred))
+  grid$z <- rbinom(nrow(grid), 1, grid$pi)
+  
+  # generate observed detections
+  grid$y <- rbinom(nrow(grid), J, grid$z * p)
+  out <- list(
+    df = grid,
+    params = list(
+      beta = beta, eta = grid$eta, theta = c(theta, 0), p = p, pi = grid$pi, z = grid$z, tau = tau
+    ),
+    expert_dists = distr_tbl
+  )
+  
+  return(out)
+}
+
+# sim data
+sim_dat <- sim_idyllic(n = 20^2, seed = 2, nregions = 6, beta = c(0, 1))
+
+# plot
+p3 <- sim_dat$df %>%
+  st_as_sf() %>%
+  ggplot() + 
+  geom_sf(aes(fill = pi)) +
+  theme_bw()
+p1 <- sim_dat$df %>%
+  st_as_sf() %>%
+  ggplot() + 
+  geom_sf(aes(fill = x)) +
+  theme_bw()
+p4 <- sim_dat$df %>%
+  mutate(z = factor(z)) %>%
+  st_as_sf() %>%
+  ggplot() + 
+  geom_sf(aes(fill = z)) +
+  theme_bw()
+p2 <- sim_dat$df %>%
+  mutate(z = factor(z)) %>%
+  mutate(naive_p = y/8) %>%
+  st_as_sf() %>%
+  ggplot() + 
+  geom_sf(aes(fill = eta)) +
+  theme_bw()
+
+gridExtra::grid.arrange(p1, p2, p3, p4, nrow = 2)
+```
+
+### Fit models
+
+We consider two different models:
+
+1) Standard occupancy ignoring spatially indexed random effects
+2) Standard occupancy including spatially indexed random effects with expert informed priors (assuming they're correct)
+
+```{r, eval = F}
+# compare to stan
+stan_fit <- stan(
+  file = "julia code/idyllic/stan_occ.stan",
+  data = list(
+    N = length(sim_dat$df$y),
+    J = 8,
+    sumy = sim_dat$df$y,
+    x = sim_dat$df$x,
+    K = 7,
+    group = sim_dat$df$group,
+    mu = sim_dat$expert_dists[,1],
+    sigma = sim_dat$expert_dists[,2]
+  ),
+  iter = 5000,
+  chains = 3,
+  pars = c("beta0", "beta1", "theta", "p", "eta")
+)
+saveRDS(stan_fit, file = "julia code/idyllic/stan_fit.rds")
+
+stan_fit <- readRDS("julia code/idyllic/stan_fit.rds")
+summary(stan_fit)$summary[,c(1, 4, 8:10)] 
+```
+
+```{r, eval = F}
+# export data list to Julia
+data_list <- list(
+  y = sim_dat$df$y,
+  J = 8,
+  X = cbind(rep(1, nrow(sim_dat$df)), sim_dat$df$x),
+  C = model.matrix(~ factor(sim_dat$df$group,) - 1) %>% unname %>% as.matrix,
+  expert_means = sim_dat$expert_dists[,1],
+  expert_sds = sim_dat$expert_dists[,2]
+)
+saveRDS(data_list, "julia code/idyllic/data_list.rds")
+```
+
+```{r, eval = F}
+# load fitted model from Julia
+fit_parallel <- readJMCMC("julia code/idyllic/expert_hier_idyllic.rds")
+tmp <- nimble_summary(fit_parallel, warmup = 0)
+tmp[,c(1,5,9:11)] %>% head
+tmp[,c(1,5,9:11)] %>% tail
+trace_plot(fit_parallel, which = c("beta[1]", "beta[1]"))
+
+# prediction
+tbl1 <- tibble(
+  param = rownames(tmp),
+  mean = tmp[,1],
+  lwr = tmp[,5],
+  upr = tmp[,9],
+  truth = with(sim_dat$params, c(tau, beta, theta, eta, z, p))
+) %>%
+  mutate(
+    capture = factor(ifelse(truth <= upr & truth >= lwr, 1, 0))
+  )
+tbl1 %>%
+  filter(!grepl("z[[]", param)) %>%
+  filter(!grepl("eta[[]", param)) %>%
+  bind_rows(., tbl1 %>% filter(grepl("beta", param))) %>%
+  bind_rows(., tbl1 %>% filter(grepl("theta", param))) %>%
+  ggplot() +
+  geom_pointrange(aes(xmin = lwr, x = mean, xmax = upr, y = param, color = capture)) +
+  geom_point(aes(x = truth, y = param)) +
+  theme_bw()
+
+tbl1 %>%
+  filter(grepl("eta[[]", param)) %>%
+  filter(!grepl("beta[[]", param)) %>%
+  filter(!grepl("theta[[]", param)) %>%
+  ggplot() +
+  geom_pointrange(aes(xmin = lwr, x = mean, xmax = upr, y = param, color = capture)) +
+  geom_point(aes(x = truth, y = param)) +
+  theme_bw()
+
+tbl1 %>%
+  filter(grepl("etastar[[]", param)) %>%
+  ggplot() +
+  geom_pointrange(aes(xmin = lwr, x = mean, xmax = upr, y = param, color = capture)) +
+  geom_point(aes(x = truth, y = param)) +
+  theme_bw()
+```
 
