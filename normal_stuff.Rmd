@@ -1,0 +1,284 @@
+## Idyllic case - normal response
+
+### Sampling model
+
+We first imagine the data arising directly from the specified model. That is, 
+\[
+\begin{split}
+y_i &\sim \text{Normal}(x_i'\beta + \eta_i, \tau^2)
+\end{split}
+\]
+We assume that $\eta_i \sim N(\mu_{c_i}, \sigma_{c_i})$, where $c_i$ is an indicator vector denoting distinct regions assigned by the expert. For now, we assume that $p$ is constant (to speed up simulated studies). 
+
+### Simulated data
+
+```{r}
+# functions to simulate data
+fitnorm <- function(lwr, upr, delta = 1e-3, root = 2){
+  # fit normal distribution such that
+  ## mu = logit(midpt)
+  ## Pr(Y < logit(lwr)) = .025
+  logit <- function(p) log(p / (1-p))
+  
+  if(lwr == 0) lwr <- lwr + delta
+  if(upr == 1) upr <- upr - delta
+  
+  # precalc quantities
+  midpt <- (lwr + upr)/2
+  mu <- logit(midpt)
+  
+  f <- function(gamma){
+    pnorm(logit(upr), mu, abs(mu)^(1/root) * exp(gamma)) - pnorm(logit(lwr), mu, abs(mu)^(1/root) * exp(gamma)) - .95
+  }
+  root <- uniroot(f, c(-10, 10))
+  return(c(mu, exp(root$root)))
+}
+split_poly <- function(grid, n_areas){
+  # combine
+  sf_poly = grid %>% st_as_sf %>% st_union 
+  
+  # create random points
+  points_rnd <- st_sample(sf_poly, size = 10000)
+  
+  # k-means clustering
+  points <- do.call(rbind, st_geometry(points_rnd)) %>%
+    as_tibble() %>%
+    setNames(c("lon","lat"))
+  k_means <- kmeans(points, centers = n_areas)
+  
+  # create voronoi polygons
+  voronoi_polys <- st_voronoi(
+    st_as_sf(
+      k_means$centers %>% 
+        as_tibble, 
+      coords = c("lon", "lat")
+    ) %>% st_union,
+    sf_poly
+  )
+  
+  # convert to multipolygons
+  tmp <- st_cast(voronoi_polys) %>%
+    st_as_sf()
+  
+  group <- matrix(NA, nrow(grid), 1)
+  coverby <- st_covered_by(grid %>% st_as_sf, tmp %>% st_buffer(.5))
+  for(i in 1:nrow(grid)){
+    if(length(coverby[[i]]) == 0){
+      NULL
+    } else{
+      group[i] <- coverby[[i]]  
+    }
+  }
+  out <- grid
+  out$group <- c(group)
+  
+  out %>%
+    st_as_sf %>% 
+    ggplot() + 
+    geom_sf(aes(fill = group))
+  return(out)
+}
+sim_idyllic <- function(n = 100, seed = 1, beta = c(0,1), tau = 1, tau_eta = 1, nregions = 4, root = 3){
+  # housekeeping
+  if((sqrt(n) %% 1) != 0) stop("n should be a perfect square")
+  set.seed(seed)
+  sigma = 1
+  phi = 3
+  
+  # bring along the daub classes
+  logit <- function(p) log(p / (1-p))
+  daub <- round(tibble(
+    `Class` = 1:6,
+    `Lower` = c(0, .05, .25, .50, .75, .95),
+    `Upper` = c(.05, .25, .50, .75, .95, 1)
+  ) %>%
+    mutate(`Midpoint` = (Lower + Upper)/2) %>%
+    mutate(
+      logitL = logit(Lower+.01), 
+      logitM = logit(Midpoint),
+      logitU = logit(Upper-.01)
+    ), 2)
+  
+  distr_tbl <- t(apply(
+    daub %>% dplyr::select(Lower, Upper) %>% as.matrix,
+    1, 
+    function(x) fitnorm(x[1], x[2], delta = 1e-3, root = root)
+  )) %>% unname
+  distr_tbl <- rbind(
+    distr_tbl,
+    c(0, 1)
+  )
+  
+  # create grid
+  sfc <- st_sfc(st_polygon(list(rbind(c(0,0), c(sqrt(n),0), c(sqrt(n),sqrt(n)), c(0,0)))))
+  grid <- st_as_sf(st_make_grid(sfc, cellsize = 1, square = TRUE)) %>% as_tibble
+  names(grid) <- "geometry"
+  rm(sfc)
+  
+  # add centroid and assign group
+  grid <- split_poly(grid, nregions)
+  
+  # assign normal distributions to each region
+  if(nregions != 6) stop("must have 6 regions for now")
+  grid$group <- with(grid, ifelse(is.na(group), 7, group))
+
+  # spatial random effects
+  coords <- suppressWarnings({grid %>%
+      st_as_sf %>%
+      st_centroid %>%
+      st_coordinates})
+  dist_mat <- coords %>%
+    as.matrix %>%
+    dist %>% as.matrix
+  
+  # generate spatial covariate
+  Sigma <- sigma^2 * exp(-dist_mat^2 / (2*phi^2)) + diag(1e-1, dim(dist_mat))
+  grid$x <- c(mvtnorm::rmvnorm(1, rep(0, n), Sigma))
+  
+  # generate spatially indexed random effects
+  theta <- apply(distr_tbl, 1, function(x) rnorm(1, x[1], x[2]))
+  grid$theta <- sapply(grid$group, function(x) theta[x])
+  grid$eta <- rnorm(nrow(grid), grid$theta, tau_eta)
+  
+  # generate z states
+  grid$linpred <- beta[1] + beta[2]*grid$x + grid$eta
+  grid$y <- rnorm(nrow(grid), grid$linpred, tau)
+
+  # generate observed detections
+  out <- list(
+    df = grid,
+    params = list(
+      beta = beta, eta = grid$eta, theta = c(theta, 0), tau = tau, tau_eta = tau_eta
+    ),
+    expert_dists = distr_tbl
+  )
+  
+  return(out)
+}
+
+# sim data
+sim_dat <- sim_idyllic(
+  n = 20^2, 
+  seed = 2,
+  nregions = 6,
+  beta = c(0, 1)
+)
+
+# plot
+p1 <- sim_dat$df %>%
+  st_as_sf() %>%
+  ggplot() + 
+  geom_sf(aes(fill = x)) +
+  theme_bw()
+p2 <- sim_dat$df %>%
+  st_as_sf() %>%
+  ggplot() + 
+  geom_sf(aes(fill = eta)) +
+  theme_bw()
+p3 <- sim_dat$df %>%
+  st_as_sf() %>%
+  ggplot() + 
+  geom_sf(aes(fill = theta)) +
+  theme_bw()
+p4 <- sim_dat$df %>%
+  st_as_sf() %>%
+  ggplot() + 
+  geom_sf(aes(fill = y)) +
+  theme_bw()
+
+gridExtra::grid.arrange(p1, p2, p3, p4, nrow = 2)
+```
+
+### Fit models
+
+We consider two different models:
+
+1) Standard occupancy ignoring spatially indexed random effects
+2) Standard occupancy including spatially indexed random effects with expert informed priors (assuming they're correct)
+
+```{r, eval = F}
+# compare to stan
+stan_fit <- stan(
+  file = "julia code/idyllic/stan_normal.stan",
+  data = list(
+    N = length(sim_dat$df$y),
+    J = 8,
+    y = sim_dat$df$y,
+    x = sim_dat$df$x,
+    K = 7,
+    group = sim_dat$df$group,
+    mu = sim_dat$expert_dists[,1],
+    sigma = sim_dat$expert_dists[,2]
+  ),
+  iter = 5000,
+  chains = 3,
+  pars = c("tau", "beta0", "beta1", "theta", "eta")
+)
+saveRDS(stan_fit, file = "julia code/idyllic/stan_fit_normal.rds")
+
+stan_fit <- readRDS("julia code/idyllic/stan_fit_normal.rds")
+summary(stan_fit)$summary[,c(1, 4, 8:10)] 
+```
+
+
+```{r, eval = F}
+# export data list to Julia
+data_list <- list(
+  y = sim_dat$df$y,
+  J = 8,
+  X = cbind(rep(1, nrow(sim_dat$df)), sim_dat$df$x),
+  C = model.matrix(~ factor(sim_dat$df$group,) - 1) %>% unname %>% as.matrix,
+  expert_means = sim_dat$expert_dists[,1],
+  expert_sds = sim_dat$expert_dists[,2]
+)
+saveRDS(data_list, "julia code/idyllic/data_list.rds")
+```
+
+```{r, eval = F}
+# load fitted model from Julia
+fit_parallel <- readJMCMC("julia code/idyllic/expert_hier_idyllic.rds")
+tmp <- nimble_summary(fit_parallel, warmup = 0)
+tmp[,c(1,5,9:11)] %>% head
+tmp[,c(1,5,9:11)] %>% tail
+trace_plot(fit_parallel, which = c("beta[1]", "beta[1]"))
+
+# prediction
+tbl1 <- tibble(
+  param = rownames(tmp),
+  mean = tmp[,1],
+  lwr = tmp[,5],
+  upr = tmp[,9],
+  truth = with(sim_dat$params, c(tau, beta, theta, eta, z, p))
+) %>%
+  mutate(
+    capture = factor(ifelse(truth <= upr & truth >= lwr, 1, 0))
+  )
+tbl1 %>%
+  filter(!grepl("z[[]", param)) %>%
+  filter(!grepl("eta[[]", param)) %>%
+  bind_rows(., tbl1 %>% filter(grepl("beta", param))) %>%
+  bind_rows(., tbl1 %>% filter(grepl("theta", param))) %>%
+  ggplot() +
+  geom_pointrange(aes(xmin = lwr, x = mean, xmax = upr, y = param, color = capture)) +
+  geom_point(aes(x = truth, y = param)) +
+  theme_bw()
+
+tbl1 %>%
+  filter(grepl("eta[[]", param)) %>%
+  filter(!grepl("beta[[]", param)) %>%
+  filter(!grepl("theta[[]", param)) %>%
+  ggplot() +
+  geom_pointrange(aes(xmin = lwr, x = mean, xmax = upr, y = param, color = capture)) +
+  geom_point(aes(x = truth, y = param)) +
+  theme_bw()
+
+tbl1 %>%
+  filter(grepl("etastar[[]", param)) %>%
+  ggplot() +
+  geom_pointrange(aes(xmin = lwr, x = mean, xmax = upr, y = param, color = capture)) +
+  geom_point(aes(x = truth, y = param)) +
+  theme_bw()
+```
+
+
+

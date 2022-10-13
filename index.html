@@ -143,7 +143,7 @@ code span.wa { color: #5e5e5e; font-style: italic; } /* Warning */
   <!--/radix_placeholder_rmarkdown_metadata-->
   
   <script type="text/json" id="radix-resource-manifest">
-  {"type":"character","attributes":{},"value":["bibliography.bib","biometrics_notes.csl","index_files/anchor-4.2.2/anchor.min.js","index_files/bowser-1.9.3/bowser.min.js","index_files/distill-2.2.21/template.v2.js","index_files/figure-html5/unnamed-chunk-2-1.png","index_files/figure-html5/unnamed-chunk-3-1.png","index_files/header-attrs-2.14/header-attrs.js","index_files/jquery-3.6.0/jquery-3.6.0.js","index_files/jquery-3.6.0/jquery-3.6.0.min.js","index_files/jquery-3.6.0/jquery-3.6.0.min.map","index_files/popper-2.6.0/popper.min.js","index_files/tippy-6.2.7/tippy-bundle.umd.min.js","index_files/tippy-6.2.7/tippy-light-border.css","index_files/tippy-6.2.7/tippy.css","index_files/tippy-6.2.7/tippy.umd.min.js","index_files/webcomponents-2.0.0/webcomponents.js","julia code/idyllic/data_list.rds","julia code/idyllic/fit_occ.jl"]}
+  {"type":"character","attributes":{},"value":["bibliography.bib","biometrics_notes.csl","index_files/anchor-4.2.2/anchor.min.js","index_files/bowser-1.9.3/bowser.min.js","index_files/distill-2.2.21/template.v2.js","index_files/figure-html5/unnamed-chunk-2-1.png","index_files/figure-html5/unnamed-chunk-3-1.png","index_files/figure-html5/unnamed-chunk-5-1.png","index_files/figure-html5/unnamed-chunk-5-2.png","index_files/header-attrs-2.14/header-attrs.js","index_files/jquery-3.6.0/jquery-3.6.0.js","index_files/jquery-3.6.0/jquery-3.6.0.min.js","index_files/jquery-3.6.0/jquery-3.6.0.min.map","index_files/popper-2.6.0/popper.min.js","index_files/tippy-6.2.7/tippy-bundle.umd.min.js","index_files/tippy-6.2.7/tippy-light-border.css","index_files/tippy-6.2.7/tippy.css","index_files/tippy-6.2.7/tippy.umd.min.js","index_files/webcomponents-2.0.0/webcomponents.js","julia code/idyllic/data_list.rds","julia code/idyllic/expert_hier_idyllic.rds","julia code/idyllic/fit_occ.jl","julia code/idyllic/stan_fit.rds","julia code/idyllic/stan_fit_normal.rds","julia code/idyllic/stan_normal.rds","julia code/idyllic/stan_normal.stan","julia code/idyllic/stan_occ.rds","julia code/idyllic/stan_occ.stan"]}
   </script>
   <!--radix_placeholder_navigation_in_header-->
   <!--/radix_placeholder_navigation_in_header-->
@@ -1979,10 +1979,31 @@ studies).</p>
 <li>Standard occupancy including spatially indexed random effects with
 expert informed priors (assuming they’re correct)</li>
 </ol>
+<h4 id="stan">Stan</h4>
 <div class="layout-chunk" data-layout="l-body">
 
 </div>
-<div class="sourceCode" id="cb1"><pre
+<div class="layout-chunk" data-layout="l-body">
+<pre><code>               mean        2.5%       97.5%    n_eff      Rhat
+beta0    -0.4084544 -0.84573541  0.02552979 1746.336 1.0004883
+beta1     1.1698715  0.82708278  1.52922756 5849.606 1.0000620
+theta[1] -3.6949163 -4.19738788 -3.18231491 1712.679 1.0002306
+theta[2] -1.7160082 -2.25990121 -1.18897742 1574.704 1.0004602
+theta[3] -0.3208670 -0.83510054  0.20286974 1675.641 1.0016861
+theta[4]  0.6282266  0.07737064  1.16943527 1293.434 1.0000352
+theta[5]  1.7540043  1.21710173  2.28761715 1739.196 0.9999378
+theta[6]  3.4278387  2.93131714  3.93380405 2288.190 1.0026191
+theta[7]  0.4589432 -0.71709391  1.62831189 2190.760 1.0005614</code></pre>
+<p><img src="index_files/figure-html5/unnamed-chunk-5-1.png" width="960" style="display: block; margin: auto;" /><img src="index_files/figure-html5/unnamed-chunk-5-2.png" width="960" style="display: block; margin: auto;" /></p>
+</div>
+<h4 id="gibbs">Gibbs</h4>
+<div class="layout-chunk" data-layout="l-body">
+
+</div>
+<div class="layout-chunk" data-layout="l-body">
+
+</div>
+<div class="sourceCode" id="cb2"><pre
 class="sourceCode r distill-force-highlighting-css"><code class="sourceCode r"></code></pre></div>
 <div id="refs" class="references csl-bib-body hanging-indent"
 role="doc-bibliography">
