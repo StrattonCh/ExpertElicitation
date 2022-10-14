@@ -281,4 +281,4 @@ tbl1 %>%
 ```
 
 
-
+# Gibbs for nonnormal

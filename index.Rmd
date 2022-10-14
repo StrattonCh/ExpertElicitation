@@ -151,17 +151,16 @@ Z_i &\sim \text{Bernoulli}(\psi_i) \\
 y_i &\sim \text{Bernoulli}(z_i p_{ij})
 \end{split}
 \]
-where $\text{logit}(\psi_i) = x_i'\beta + \eta_i$ and $\text{logit}(p_{ij}) = W\alpha$.
+where $\text{logit}(\psi_i) = x_i'\beta + \theta_{i}$ and $\text{logit}(p_{ij}) = W\alpha$.
 
-Additional structure may be imposed of $\boldsymbol{\eta}$. For example, one could draw $\boldsymbol{\eta}$ from a Gaussian process with spatial covariance structure. Alternatively, $\boldsymbol{\eta}$ may be drawn from a hierarchical normal distribution. 
+Additional structure may be imposed on $\boldsymbol{\theta}$. For example, one could draw $\boldsymbol{\theta}$ from a Gaussian process with spatial covariance structure. Alternatively, $\boldsymbol{\theta}$ may be drawn from a hierarchical normal distribution if expert information is available to inform a grouping structure among sites.
 \[
-\eta_i \sim N(\theta_{c_i}, \sigma_{c_i}) 
+\boldsymbol{\theta} \sim \mathcal{N}(\boldsymbol{\mu}, \boldsymbol{\tau} \boldsymbol{\Omega}\boldsymbol{\tau}^T) 
 \]
-where $\boldsymbol{c}$ is a vector of indicators denoting the group associated with observation $i$. Then,
+Under this formulation, $\text{logit}(\psi_i) = x_i'\beta + \theta_{c_i}$, where $\boldsymbol{c}$ is a vector of indicators denoting the group associated with $\psi_i$. Note that the above formulation assume a general correlation structure among $\boldsymbol{\theta}$ (in the form of $\boldsymbol{\Omega}$), but independence may be assumed. Under this framework, expert knowledge may be used to inform $\boldsymbol{\mu}$. For example, 
 \[
-\boldsymbol{\theta} \sim \mathcal{N}(\boldsymbol{\mu}, \boldsymbol{\Sigma})
+\boldsymbol{\mu} \sim \mathcal{N}(\boldsymbol{m}, \boldsymbol{s}\mathcal{I}\boldsymbol{s}^T)
 \]
-This is the structure we exploit for the expert elicitation problem, allowing expert knowledge to inform $\{\boldsymbol{\mu}, \boldsymbol{\Sigma}\}$.
 
 # Expert response structure
 
@@ -311,11 +310,20 @@ plot_mapping <- function(delta, k){
 plot_mapping(1e-3, c(2,3))
 ```
 
-We then let $\boldsymbol{\mu} = \{\mu_1, \dots, \mu_6\}$ and $\boldsymbol{\Sigma} = \text{diag}(\sigma_1, \dots, \sigma_6)$.
-
 # Model estimation
 
-To improve computational efficiency, we write the sampler for this model by hand. Leveraging the data augmentation strategy of @polson2013, Gibbs draws are available for all parameters in the model. 
+To improve computational efficiency, we write the sampler for this model by hand. Leveraging the data augmentation strategy of @polson2013, Gibbs draws are available for all parameters in the model. The full specification of the model is as follows. Let $i$ index the sample location, $j$ index the visit to site $i$, and $\boldsymbol{c}$ denote a vector group membership informed by expert opinion. Then,
+\[
+\begin{split}
+Z_i &\sim \text{Bernoulli}(\psi_i) \\
+y_{ij} &\sim \text{Bernoulli}(z_i p_{ij})
+\end{split}
+\]
+where $\text{logit}(\psi_i) = \boldsymbol{x}_i^T\boldsymbol{\beta}+ \theta_{c_i}$ and
+\[
+\boldsymbol{\theta} \sim \mathcal{N}(\boldsymbol{\mu}, \tau^2 \boldsymbol{\mathcal{I}})
+\]
+For now, we assume that $p_{ij} = p$ for all $\{i, j\}$ to speed up computation (though this assumption can be easily relaxed). 
 
 ## Polya-gamma data augmentation
 
@@ -336,16 +344,16 @@ Z_i^{(\psi)} \sim
 
 Let $\omega^{(\beta)}_i \sim \text{PG}(1, 0)$. Then,
 \[
-z_i = \frac{1}{\omega^{(\beta)}_i}\left(z^{(\psi)}_i - \frac{1}{2}\right) \sim \mathcal{N}\left(\boldsymbol{x}_i'\boldsymbol{\beta} + \eta_i, \frac{1}{\omega_i} \right).
+z_i = \frac{1}{\omega^{(\beta)}_i}\left(z^{(\psi)}_i - \frac{1}{2}\right) \sim \mathcal{N}\left(\boldsymbol{x}_i'\boldsymbol{\beta} + \theta_{c_i}, \frac{1}{\omega_i} \right).
 \]
 where $z^{(\psi)}_i$ is the latent occupancy state for site $i$. See @polson2013 for more detail. Equivalently, let $\boldsymbol{\Omega}_{(\beta)} = \text{diag}(\omega^{(\beta)}_1, \dots, \omega^{(\beta)}_n)$. Then,
 \[
-\boldsymbol{z} \sim \mathcal{N}\left(X\boldsymbol{\beta}+ \boldsymbol{\eta}, \boldsymbol{\Omega}_{(\beta)}^{-1}\right)
+\boldsymbol{z} \sim \mathcal{N}\left(X\boldsymbol{\beta}+ \boldsymbol{C}\boldsymbol{\theta}, \boldsymbol{\Omega}_{(\beta)}^{-1}\right)
 \]
-From @polson2013, the full conditional distribution of $\omega^{(\beta)}_i$ is
+where $\boldsymbol{C}$ is an indicator matrix denoting group membership. From @polson2013, the full conditional distribution of $\omega^{(\beta)}_i$ is
 \[
 \begin{split}
-\omega^{(\beta)}_i | \cdot \sim \text{PG}(1, \boldsymbol{x}_i'\boldsymbol{\beta} + \eta_i)
+\omega^{(\beta)}_i | \cdot \sim \text{PG}(1, \boldsymbol{x}_i'\boldsymbol{\beta} + \theta_{c_i})
 \end{split}
 \]
 
@@ -356,13 +364,13 @@ Let $\boldsymbol{\beta} \sim \mathcal{N}(\boldsymbol{\mu}_{0, \beta}, \boldsymbo
 \begin{split}
 \boldsymbol{\beta} | \cdot &\sim \mathcal{N}(\boldsymbol{m}, \boldsymbol{V}) \\
 \boldsymbol{V} &= \left(\boldsymbol{X}^T \boldsymbol{\Omega}_{(\beta)} \boldsymbol{X} +  \boldsymbol{\Sigma}^{-1}_{0, \beta}\right)^{-1} \\
-\boldsymbol{m} &= \boldsymbol{V} \left(\boldsymbol{X}^T \boldsymbol{\Omega}_{(\beta)} (\boldsymbol{z} - \boldsymbol{\eta}) + \boldsymbol{\Sigma}^{-1}_{0, \beta}\boldsymbol{\mu}_{0, \beta} \right)
+\boldsymbol{m} &= \boldsymbol{V} \left(\boldsymbol{X}^T \boldsymbol{\Omega}_{(\beta)} (\boldsymbol{z} - \boldsymbol{C}\boldsymbol{\theta}) + \boldsymbol{\Sigma}^{-1}_{0, \beta}\boldsymbol{\mu}_{0, \beta} \right)
 \end{split}
 \]
 
 Proof (omitting boldface text):
 
-Let $z^* = z - \eta$
+Let $z^* = z - C\theta$
 \[
 \begin{split}
 p(\beta | z^*, \omega^{(\beta)}) &\propto p(z^* | \beta, \omega^{(\beta)}) p(\beta) \\
@@ -371,68 +379,64 @@ p(\beta | z^*, \omega^{(\beta)}) &\propto p(z^* | \beta, \omega^{(\beta)}) p(\be
 \end{split}
 \]
 
-## Sampling $\boldsymbol{\eta}$
-
-Let $\boldsymbol{\eta} \sim \mathcal{N}(\boldsymbol{C}\boldsymbol{\theta}, \tau^2\mathcal{I})$. Where $\boldsymbol{C}$ is an indicator matrix attributing each location to a group based on expert opinion. Then,
-\[
-\begin{split}
-\boldsymbol{\eta} | \cdot &\sim \mathcal{N}(\boldsymbol{m}, \boldsymbol{V}) \\
-\boldsymbol{V} &= \left(\boldsymbol{\Omega}_{(\beta)} + \frac{1}{\tau^2} \boldsymbol{\mathcal{I}}\right)^{-1} \\
-\boldsymbol{m} &= \boldsymbol{V} \left(\boldsymbol{\Omega}_{(\beta)} (\boldsymbol{z} - \boldsymbol{X}\boldsymbol{\beta}) + \frac{1}{\tau^2}\boldsymbol{C}\boldsymbol{\theta}\right)
-\end{split}
-\]
-
-Proof (omitting boldface):
-
-Let $z^* = z - X\beta$. Then,
-\[
-\begin{split}
-p(\eta | z^*, \omega^{(\beta)}) &\propto p(z^* | \eta, \omega^{(\beta)}) p(\eta) \\
-&\propto \exp\left\{-\frac{1}{2}(z^* - \eta)^T \Omega_{(\beta)}(z^* - \eta) \right\} \exp\left\{-\frac{1}{2}(\eta - C\theta)^T \frac{1}{\tau^2} \mathcal{I}(\eta - C\theta) \right\}  \\
-&\propto \exp \left\{-\frac{1}{2} \left(\eta^T (\Omega_{(\beta)} + \frac{1}{\tau^2} \mathcal{I}) \eta - 2\eta^T (\Omega_{(\beta)}z^* + \frac{1}{\tau^2} C\theta)\right) \right\}
-\end{split}
-\]
-
 ## Sampling $\boldsymbol{\theta}$
 
-Let $\boldsymbol{\theta} \sim \mathcal{N}(\boldsymbol{\mu}, \boldsymbol{\Sigma})$. Note that the expert elicitation informs $\{\boldsymbol{\mu}, \boldsymbol{\Sigma}\}$! The full conditional posterior distribution of $\boldsymbol{\mu}$ is
+Let $\boldsymbol{\theta} \sim \mathcal{N}(\boldsymbol{\mu}, \tau^2\boldsymbol{\mathcal{I}})$. Note that the expert elicitation informs $\boldsymbol{\mu}$. The full conditional posterior distribution of $\boldsymbol{\theta}$ is
 \[
 \begin{split}
 \boldsymbol{\theta} | \cdot &\sim \mathcal{N}(\boldsymbol{m}, \boldsymbol{V}) \\
-\boldsymbol{V} &= \left(\frac{1}{\tau^2}\boldsymbol{C}^T\boldsymbol{C} + \boldsymbol{\Sigma}^{-1}\right)^{-1} \\
-\boldsymbol{m} &= \boldsymbol{V} \left(\frac{1}{\tau^2}\boldsymbol{C}^T \boldsymbol{\eta} + \boldsymbol{\Sigma}^{-1} \boldsymbol{\mu}\right)
+\boldsymbol{V} &= \left(\boldsymbol{C}^T \boldsymbol{\Omega}_{(\beta)} \boldsymbol{C} +  \frac{1}{\tau^2}\boldsymbol{\mathcal{I}}\right)^{-1} \\
+\boldsymbol{m} &= \boldsymbol{V} \left(\boldsymbol{C}^T \boldsymbol{\Omega}_{(\beta)} (\boldsymbol{z} - \boldsymbol{X}\boldsymbol{\beta}) + \frac{1}{\tau^2} \boldsymbol{\mathcal{I}}\boldsymbol{\mu} \right)
 \end{split}
 \]
 
-Proof (omitting boldface):
+Proof (omitting boldface text):
+
+Let $z^* = z - X\beta$
 \[
 \begin{split}
-p(\theta | \eta, \tau) &\propto p(\eta | \theta, \tau) p(\theta) \\
-&\propto\exp\left\{-\frac{1}{2}(\eta - C\theta)^T \frac{1}{\tau^2} \mathcal{I}(\eta - C\theta) \right\}  \exp\left\{-\frac{1}{2}(\theta - \mu)^T\Sigma^{-1}(\theta - \mu) \right\} \\
-&\propto \exp \left\{-\frac{1}{2} \left(\theta^T (\frac{1}{\tau^2} C^TC + \Sigma^{-1}) \theta - 2\theta^T (\frac{1}{\tau^2}C^T \eta + \Sigma^{-1}\mu)\right) \right\}
+p(\beta | z^*, \omega^{(\beta)}) &\propto p(z^* | \theta, \omega^{(\beta)}) p(\theta) \\
+&\propto \exp\left\{-\frac{1}{2}(z^* - C\theta)^T \Omega_{(\beta)}(z^* - C\theta) \right\} \exp\left\{-\frac{1}{2}(\theta - \mu)^T \frac{1}{\tau^2}\mathcal{I}(\theta - \mu) \right\}  \\
+&\propto \exp \left\{-\frac{1}{2} \left(\theta^T (C^T \Omega_{(\beta)} C + \frac{1}{\tau^2}\mathcal{I})  \theta - 2\theta^T( C^T \Omega_{(\beta)} z^* + \frac{1}{\tau^2} \mathcal{I}\mu )\right) \right\}
+\end{split}
+\]
+
+## Sampling $\boldsymbol{\mu}$
+
+Let $\boldsymbol{\mu} \sim \mathcal{N}(\boldsymbol{m}, \boldsymbol{s}\mathcal{I}\boldsymbol{s}^T)$, where $\boldsymbol{m}$ and $\boldsymbol{s}$ may be informed by expert opinion. Then
+\[
+\begin{split}
+\boldsymbol{\mu} | \cdot &\sim \mathcal{N}(\boldsymbol{m}_0, \boldsymbol{V})  \\
+\boldsymbol{V} &= \left(\frac{1}{\tau^2} \boldsymbol{\mathcal{I}} + \boldsymbol{s}^{-1}\boldsymbol{\mathcal{I}} (\boldsymbol{s}^{-1})^T \right)^{-1} \\
+\boldsymbol{m}_0 &= \boldsymbol{V}\left(\frac{1}{\tau^2} \boldsymbol{\mathcal{I}}\boldsymbol{\theta} + \boldsymbol{s}^{-1}\boldsymbol{\mathcal{I}} (\boldsymbol{s}^{-1})^T \boldsymbol{m} \right) 
+\end{split}
+\]
+
+Proof (omitting boldface text):
+\[
+\begin{split}
+p(\mu | \cdot) &\propto p(\theta | \mu, \tau^2) p(\mu) \\
+&\propto \exp\left\{-\frac{1}{2}(\theta - \mu)^T \frac{1}{\tau^2}\mathcal{I}(\theta - \mu) \right\} \exp\left\{-\frac{1}{2}(\mu - m)^T s^{-1} \mathcal{I} s^{-1} (\mu - m) \right\} \\
+&\propto \exp\left\{ -\frac{1}{2} \left(\mu^T (\frac{1}{\tau^2} \mathcal{I} + s^{-1} \mathcal{I} s^{-1})\mu - 2\mu^T(\frac{1}{\tau^2}\mathcal{I}\theta + s^{-1} \mathcal{I} s^{-1} m) \right) \right\}
 \end{split}
 \]
 
 ## Sampling $\tau$
 
-__Consider $\tau_{c_i}$?__
-
 Let $\tau^2 \sim \text{Inverse-Gamma}(a_0, b_0)$. Then,
 \[
 \begin{split}
 \tau^2 | \cdot &\sim \text{Inverse-Gamma}(a, b) \\
-a &= a_0 + \frac{n}{2} \\
-b &= b_0 + \frac{1}{2}(\boldsymbol{\eta} - \boldsymbol{C}\boldsymbol{\theta})^T(\boldsymbol{\eta} - \boldsymbol{C}\boldsymbol{\theta})
+a &= a_0 + \frac{K}{2} \\
+b &= b_0 + \frac{1}{2}(\boldsymbol{\theta} - \boldsymbol{\mu})^T(\boldsymbol{\theta} - \boldsymbol{\mu})
 \end{split}
 \]
-
-
 
 Proof (omitting boldface):
 \[
 \begin{split}
-p(\tau^2 | \eta, \theta) &\propto p(\eta | \tau^2, \theta) p(\tau^2) \\
-&\propto (\tau^2)^{-n/2} \exp\left\{-\frac{1}{2}(\eta - C\theta)^T \frac{1}{\tau^2} \mathcal{I}(\eta - C\theta)\right\} (\tau^2)^{-a_0 - 1} \exp\left(-\frac{b_0}{\tau^2}\right)
+p(\tau^2 | \theta, \mu) &\propto p(\theta | \tau^2, \mu) p(\tau^2) \\
+&\propto (\tau^2)^{-K/2} \exp\left\{-\frac{1}{2}(\theta - \mu)^T \frac{1}{\tau^2} \mathcal{I}(\theta - \mu)\right\} (\tau^2)^{-a_0 - 1} \exp\left(-\frac{b_0}{\tau^2}\right)
 \end{split}
 \]
 
@@ -578,21 +582,21 @@ sim_idyllic <- function(n = 100, J = 8, seed = 1, beta = c(0,1), p = .5, tau = 1
   grid$x <- c(mvtnorm::rmvnorm(1, rep(0, n), Sigma))
   
   # generate spatially indexed random effects
-  theta <- apply(distr_tbl, 1, function(x) rnorm(1, x[1], x[2]))
+  mu <- apply(distr_tbl, 1, function(x) rnorm(1, x[1], x[2]))
+  theta <- sapply(mu, function(x) rnorm(1, x, tau))
   grid$theta <- sapply(grid$group, function(x) theta[x])
-  grid$eta <- rnorm(nrow(grid), grid$theta, tau)
   
   # generate z states
-  grid$linpred <- beta[1] + beta[2]*grid$x + grid$eta
-  grid$pi <- exp(grid$linpred) / (1 + exp(grid$linpred))
-  grid$z <- rbinom(nrow(grid), 1, grid$pi)
+  grid$linpred <- beta[1] + beta[2]*grid$x + grid$theta
+  grid$psi <- exp(grid$linpred) / (1 + exp(grid$linpred))
+  grid$z <- rbinom(nrow(grid), 1, grid$psi)
   
   # generate observed detections
   grid$y <- rbinom(nrow(grid), J, grid$z * p)
   out <- list(
     df = grid,
     params = list(
-      beta = beta, eta = grid$eta, theta = c(theta), p = p, pi = grid$pi, z = grid$z, tau = tau
+      beta = beta, theta = c(theta), p = p, psi = grid$psi, z = grid$z, tau = tau, mu = mu
     ),
     expert_dists = distr_tbl
   )
@@ -607,7 +611,7 @@ sim_dat <- sim_idyllic(n = 20^2, seed = 2, nregions = 6, beta = c(0, 1))
 p3 <- sim_dat$df %>%
   st_as_sf() %>%
   ggplot() + 
-  geom_sf(aes(fill = pi)) +
+  geom_sf(aes(fill = psi)) +
   theme_bw()
 p1 <- sim_dat$df %>%
   st_as_sf() %>%
@@ -625,80 +629,20 @@ p2 <- sim_dat$df %>%
   mutate(naive_p = y/8) %>%
   st_as_sf() %>%
   ggplot() + 
-  geom_sf(aes(fill = eta)) +
+  geom_sf(aes(fill = theta)) +
   theme_bw()
 
 gridExtra::grid.arrange(p1, p2, p3, p4, nrow = 2)
 ```
 
-### Fit models
+### Fit models with Julia
 
-We consider two different models:
+We consider two potential models:
 
-1) Standard occupancy ignoring spatially indexed random effects
-2) Standard occupancy including spatially indexed random effects with expert informed priors (assuming they're correct)
+  - model0: basic occupancy model without region-specific random effects
+  - model1: occupancy model with region-specific random effects informed by experts
 
-#### Stan
-
-```{r, eval = F}
-# compare to stan
-stan_fit <- stan(
-  file = "julia code/idyllic/stan_occ.stan",
-  data = list(
-    N = length(sim_dat$df$y),
-    J = 8,
-    sumy = sim_dat$df$y,
-    x = sim_dat$df$x,
-    K = 7,
-    group = sim_dat$df$group,
-    mu = sim_dat$expert_dists[,1],
-    sigma = sim_dat$expert_dists[,2]
-  ),
-  iter = 5000,
-  chains = 3,
-  pars = c("beta0", "beta1", "theta", "p", "eta")
-)
-saveRDS(stan_fit, file = "julia code/idyllic/stan_fit.rds")
-```
-
-```{r}
-stan_fit <- readRDS("julia code/idyllic/stan_fit.rds")
-summary(stan_fit)$summary[1:9,c(1, 4, 8:10)]
-tmp <- summary(stan_fit)$summary[,c(1, 4, 8:10)]
-tmp <- tmp[-nrow(tmp),]
-
-# plot
-tbl1 <- tibble(
-  param = rownames(tmp),
-  mean = tmp[,1],
-  lwr = tmp[,2],
-  upr = tmp[,3],
-  truth = with(sim_dat$params, c(beta, theta, p, eta))
-) %>%
-  mutate(
-    capture = factor(ifelse(truth <= upr & truth >= lwr, 1, 0))
-  )
-tbl1 %>%
-  filter(!grepl("z[[]", param)) %>%
-  filter(!grepl("eta[[]", param)) %>%
-  bind_rows(., tbl1 %>% filter(grepl("beta", param))) %>%
-  bind_rows(., tbl1 %>% filter(grepl("theta", param))) %>%
-  ggplot() +
-  geom_pointrange(aes(xmin = lwr, x = mean, xmax = upr, y = param, color = capture)) +
-  geom_point(aes(x = truth, y = param)) +
-  theme_bw()
-
-tbl1 %>%
-  filter(grepl("eta[[]", param)) %>%
-  filter(!grepl("beta[[]", param)) %>%
-  filter(!grepl("theta[[]", param)) %>%
-  ggplot() +
-  geom_pointrange(aes(xmin = lwr, x = mean, xmax = upr, y = param, color = capture)) +
-  geom_point(aes(x = truth, y = param)) +
-  theme_bw()
-```
-
-#### Gibbs
+For the time being, we assume the experts are correct.
 
 ```{r, eval = F}
 # export data list to Julia
@@ -713,13 +657,49 @@ data_list <- list(
 saveRDS(data_list, "julia code/idyllic/data_list.rds")
 ```
 
-```{r, eval = F}
+#### model0
+
+```{r, eval = T}
 # load fitted model from Julia
-fit_parallel <- readJMCMC("julia code/idyllic/expert_hier_idyllic.rds")
+fit_parallel <- readJMCMC("julia code/idyllic/model0.rds")
 tmp <- nimble_summary(fit_parallel, warmup = 0)
-tmp[,c(1,5,9:11)] %>% head
-tmp[,c(1,5,9:11)] %>% tail
-trace_plot(fit_parallel, which = c("beta[1]", "beta[1]"))
+tmp[1:11,c(1,5,9:11)] 
+
+# prediction
+tbl0 <- tibble(
+  param = rownames(tmp),
+  mean = tmp[,1],
+  lwr = tmp[,5],
+  upr = tmp[,9],
+  truth = with(sim_dat$params, c(p, beta, psi))
+) %>%
+  mutate(
+    capture = factor(ifelse(truth <= upr & truth >= lwr, 1, 0))
+  )
+
+tbl0 %>%
+  filter(!grepl("psi", param)) %>%
+  ggplot() +
+  geom_pointrange(aes(xmin = lwr, x = mean, xmax = upr, y = param, color = capture)) +
+  geom_point(aes(x = truth, y = param)) +
+  theme_bw()
+
+tbl0 %>%
+  filter(grepl("psi", param)) %>%
+  sample_n(50) %>%
+  ggplot() +
+  geom_pointrange(aes(xmin = lwr, x = mean, xmax = upr, y = param, color = capture)) +
+  geom_point(aes(x = truth, y = param)) +
+  theme_bw()
+```
+
+#### model1
+
+```{r, eval = T}
+# load fitted model from Julia
+fit_parallel <- readJMCMC("julia code/idyllic/model1.rds")
+tmp <- nimble_summary(fit_parallel, warmup = 0)
+tmp[1:11,c(1,5,9:11)] 
 
 # prediction
 tbl1 <- tibble(
@@ -727,32 +707,134 @@ tbl1 <- tibble(
   mean = tmp[,1],
   lwr = tmp[,5],
   upr = tmp[,9],
-  truth = with(sim_dat$params, c(tau, beta, theta, eta, z, p))
+  truth = with(sim_dat$params, c(p, tau, beta, theta, psi))
 ) %>%
   mutate(
     capture = factor(ifelse(truth <= upr & truth >= lwr, 1, 0))
   )
+
 tbl1 %>%
-  filter(!grepl("z[[]", param)) %>%
-  filter(!grepl("eta[[]", param)) %>%
-  bind_rows(., tbl1 %>% filter(grepl("beta", param))) %>%
-  bind_rows(., tbl1 %>% filter(grepl("theta", param))) %>%
+  filter(!grepl("psi", param)) %>%
   ggplot() +
   geom_pointrange(aes(xmin = lwr, x = mean, xmax = upr, y = param, color = capture)) +
   geom_point(aes(x = truth, y = param)) +
   theme_bw()
 
 tbl1 %>%
-  filter(grepl("eta[[]", param)) %>%
-  filter(!grepl("beta[[]", param)) %>%
-  filter(!grepl("theta[[]", param)) %>%
+  filter(grepl("psi", param)) %>%
+  sample_n(50) %>%
+  ggplot() +
+  geom_pointrange(aes(xmin = lwr, x = mean, xmax = upr, y = param, color = capture)) +
+  geom_point(aes(x = truth, y = param)) +
+  theme_bw()
+```
+
+#### Compare
+
+```{r}
+bind_rows(
+  tbl0 %>% mutate(model = "model0"),
+  tbl1 %>% mutate(model = "model1")
+) %>%
+  filter(!grepl("psi", param)) %>%
+  filter(!grepl("theta", param)) %>%
+  filter(!grepl("tau", param)) %>%
+  mutate(
+    dif = mean - truth,
+    lwr_dif = lwr - truth,
+    upr_dif = upr - truth
+  ) %>%
+  ggplot() +
+  geom_pointrange(
+    aes(
+      xmin = lwr_dif, x = dif, xmax = upr_dif,
+      y = param, color = model
+    ), position = position_dodge2(width = 1)
+  ) +
+  theme_bw() +
+  geom_vline(aes(xintercept = 0))
+
+bind_rows(
+  tbl0 %>% mutate(model = "model0"),
+  tbl1 %>% mutate(model = "model1")
+) %>%
+  filter(
+    param %in% paste0("psi[", sample(1:n(), 50), "]")
+  ) %>%
+  mutate(
+    dif = mean - truth,
+    lwr_dif = lwr - truth,
+    upr_dif = upr - truth
+  ) %>%
+  ggplot() +
+  geom_pointrange(
+    aes(
+      xmin = lwr_dif, x = dif, xmax = upr_dif,
+      y = param, color = model
+    ), position = position_dodge2(width = 1)
+  ) +
+  theme_bw() +
+  geom_vline(aes(xintercept = 0))
+```
+
+
+# Appendix: Models in Stan
+
+Below we provide `stan` code to fit the above model and showcase it on the data from the idyllic scenario. This model takes approximately 30 seconds to draw 5000 posterior samples (opposed to ~ 3 seconds for the Julia version). 
+
+```{r}
+m <- stan_model("julia code/idyllic/stan_occ.stan")
+m
+```
+
+```{r, eval = F}
+fit <- sampling(
+  m,
+  data = list(
+    N = length(sim_dat$df$y),
+    J = 8,
+    sumy = sim_dat$df$y,
+    x = sim_dat$df$x,
+    K = 7,
+    group = sim_dat$df$group,
+    m = sim_dat$expert_dists[,1],
+    s = sim_dat$expert_dists[,2]
+  ),
+  iter = 5000,
+  chains = 3,
+  pars = c("tau", "p", "beta0", "beta1", "theta", "psi")
+)
+saveRDS(fit, file = "julia code/idyllic/stan_fit.rds")
+```
+
+```{r}
+stan_fit <- readRDS("julia code/idyllic/stan_fit.rds")
+summary(stan_fit)$summary[1:11,c(1, 4, 8:10)]
+tmp <- summary(stan_fit)$summary[,c(1, 4, 8:10)]
+tmp <- tmp[-nrow(tmp),]
+
+# plot
+tbl1 <- tibble(
+  param = rownames(tmp),
+  mean = tmp[,1],
+  lwr = tmp[,2],
+  upr = tmp[,3],
+  truth = with(sim_dat$params, c(tau, p, beta, theta, psi))
+) %>%
+  mutate(
+    capture = factor(ifelse(truth <= upr & truth >= lwr, 1, 0))
+  )
+
+tbl1 %>%
+  filter(!grepl("psi[[]", param)) %>%
   ggplot() +
   geom_pointrange(aes(xmin = lwr, x = mean, xmax = upr, y = param, color = capture)) +
   geom_point(aes(x = truth, y = param)) +
   theme_bw()
 
 tbl1 %>%
-  filter(grepl("etastar[[]", param)) %>%
+  filter(grepl("psi[[]", param)) %>%
+  sample_n(50) %>%
   ggplot() +
   geom_pointrange(aes(xmin = lwr, x = mean, xmax = upr, y = param, color = capture)) +
   geom_point(aes(x = truth, y = param)) +
