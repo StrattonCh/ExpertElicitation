@@ -143,7 +143,7 @@ code span.wa { color: #5e5e5e; font-style: italic; } /* Warning */
   <!--/radix_placeholder_rmarkdown_metadata-->
   
   <script type="text/json" id="radix-resource-manifest">
-  {"type":"character","attributes":{},"value":["bibliography.bib","biometrics_notes.csl","index_files/anchor-4.2.2/anchor.min.js","index_files/bowser-1.9.3/bowser.min.js","index_files/distill-2.2.21/template.v2.js","index_files/figure-html5/unnamed-chunk-10-1.png","index_files/figure-html5/unnamed-chunk-10-2.png","index_files/figure-html5/unnamed-chunk-2-1.png","index_files/figure-html5/unnamed-chunk-3-1.png","index_files/figure-html5/unnamed-chunk-5-1.png","index_files/figure-html5/unnamed-chunk-5-2.png","index_files/figure-html5/unnamed-chunk-6-1.png","index_files/figure-html5/unnamed-chunk-6-2.png","index_files/figure-html5/unnamed-chunk-7-1.png","index_files/figure-html5/unnamed-chunk-7-2.png","index_files/figure-html5/unnamed-chunk-8-1.png","index_files/figure-html5/unnamed-chunk-8-2.png","index_files/header-attrs-2.14/header-attrs.js","index_files/jquery-3.6.0/jquery-3.6.0.js","index_files/jquery-3.6.0/jquery-3.6.0.min.js","index_files/jquery-3.6.0/jquery-3.6.0.min.map","index_files/popper-2.6.0/popper.min.js","index_files/tippy-6.2.7/tippy-bundle.umd.min.js","index_files/tippy-6.2.7/tippy-light-border.css","index_files/tippy-6.2.7/tippy.css","index_files/tippy-6.2.7/tippy.umd.min.js","index_files/webcomponents-2.0.0/webcomponents.js","julia code/idyllic/data_list.rds","julia code/idyllic/expert_hier_idyllic.rds","julia code/idyllic/fit_occ.jl","julia code/idyllic/model0.rds","julia code/idyllic/model1.rds","julia code/idyllic/occ_idyllic.rds","julia code/idyllic/stan_fit.rds","julia code/idyllic/stan_fit_normal.rds","julia code/idyllic/stan_normal.rds","julia code/idyllic/stan_normal.stan","julia code/idyllic/stan_occ.rds","julia code/idyllic/stan_occ.stan"]}
+  {"type":"character","attributes":{},"value":["bibliography.bib","biometrics_notes.csl","index_files/anchor-4.2.2/anchor.min.js","index_files/bowser-1.9.3/bowser.min.js","index_files/distill-2.2.21/template.v2.js","index_files/figure-html5/unnamed-chunk-10-1.png","index_files/figure-html5/unnamed-chunk-10-2.png","index_files/figure-html5/unnamed-chunk-11-1.png","index_files/figure-html5/unnamed-chunk-11-2.png","index_files/figure-html5/unnamed-chunk-12-1.png","index_files/figure-html5/unnamed-chunk-12-2.png","index_files/figure-html5/unnamed-chunk-12-3.png","index_files/figure-html5/unnamed-chunk-16-1.png","index_files/figure-html5/unnamed-chunk-16-2.png","index_files/figure-html5/unnamed-chunk-2-1.png","index_files/figure-html5/unnamed-chunk-3-1.png","index_files/figure-html5/unnamed-chunk-5-1.png","index_files/figure-html5/unnamed-chunk-5-2.png","index_files/figure-html5/unnamed-chunk-6-1.png","index_files/figure-html5/unnamed-chunk-6-2.png","index_files/figure-html5/unnamed-chunk-7-1.png","index_files/figure-html5/unnamed-chunk-7-2.png","index_files/figure-html5/unnamed-chunk-8-1.png","index_files/figure-html5/unnamed-chunk-8-2.png","index_files/header-attrs-2.14/header-attrs.js","index_files/jquery-3.6.0/jquery-3.6.0.js","index_files/jquery-3.6.0/jquery-3.6.0.min.js","index_files/jquery-3.6.0/jquery-3.6.0.min.map","index_files/popper-2.6.0/popper.min.js","index_files/tippy-6.2.7/tippy-bundle.umd.min.js","index_files/tippy-6.2.7/tippy-light-border.css","index_files/tippy-6.2.7/tippy.css","index_files/tippy-6.2.7/tippy.umd.min.js","index_files/webcomponents-2.0.0/webcomponents.js","julia code/idyllic/data_list.rds","julia code/idyllic/expert_hier_idyllic.rds","julia code/idyllic/fit_occ.jl","julia code/idyllic/model0.rds","julia code/idyllic/model1.rds","julia code/idyllic/occ_idyllic.rds","julia code/idyllic/stan_fit.rds","julia code/idyllic/stan_fit_normal.rds","julia code/idyllic/stan_normal.rds","julia code/idyllic/stan_normal.stan","julia code/idyllic/stan_occ.rds","julia code/idyllic/stan_occ.stan","julia code/missingcovs/data_list.rds","julia code/missingcovs/fit_occ.jl","julia code/missingcovs/model0.rds","julia code/missingcovs/model1.rds"]}
   </script>
   <!--radix_placeholder_navigation_in_header-->
   <!--/radix_placeholder_navigation_in_header-->
@@ -1603,6 +1603,9 @@ class="math inline">\(\tau\)</span></a></li>
 id="toc-synthetic-data-scenarios">Synthetic data scenarios</a>
 <ul>
 <li><a href="#idyllic-case" id="toc-idyllic-case">Idyllic case</a></li>
+<li><a href="#missing-covariate-information"
+id="toc-missing-covariate-information">Missing covariate
+information</a></li>
 </ul></li>
 <li><a href="#appendix-models-in-stan"
 id="toc-appendix-models-in-stan">Appendix: Models in Stan</a></li>
@@ -1984,6 +1987,9 @@ p(\tau^2 | \theta, \mu) &amp;\propto p(\theta | \tau^2, \mu) p(\tau^2)
 \]</span></p>
 <h1 id="synthetic-data-scenarios">Synthetic data scenarios</h1>
 <h2 id="idyllic-case">Idyllic case</h2>
+<p>In the ideal case, species occupancy arises as a function of some
+linear relationship with covariates and a regional intercept that is not
+directly observed. The experts then inform this regional intercept.</p>
 <h3 id="sampling-model">Sampling model</h3>
 <p>We first imagine the data arising directly from the specified model.
 That is, <span class="math display">\[
@@ -1992,10 +1998,10 @@ Z_i &amp;\sim \text{Bernoulli}(\psi_i) \\
 y_i &amp;\sim \text{Bernoulli}(z_i p_{ij})
 \end{split}
 \]</span> where <span class="math inline">\(\text{logit}(\psi_i) =
-x_i&#39;\beta + \eta_i\)</span> and <span
+x_i&#39;\beta + \theta_{c_i}\)</span> and <span
 class="math inline">\(\text{logit}(p_{ij}) = W\alpha\)</span>.
-Furthermore, we assume that <span class="math inline">\(\eta_i \sim
-N(\mu_{c_i}, \sigma_{c_i})\)</span>, where <span
+Furthermore, we assume that <span class="math inline">\(\theta_{c_i}
+\sim N(\mu_{c_i}, \tau^2)\)</span>, where <span
 class="math inline">\(c_i\)</span> is an indicator vector denoting
 distinct regions assigned by the expert. For now, we assume that <span
 class="math inline">\(p\)</span> is constant (to speed up simulated
@@ -2052,11 +2058,84 @@ theta[7] -1.93068826 -3.6950165 -0.3259983 1.001281 1044.2672</code></pre>
 <div class="layout-chunk" data-layout="l-body">
 <p><img src="index_files/figure-html5/unnamed-chunk-7-1.png" width="960" style="display: block; margin: auto;" /><img src="index_files/figure-html5/unnamed-chunk-7-2.png" width="960" style="display: block; margin: auto;" /></p>
 </div>
+<h2 id="missing-covariate-information">Missing covariate
+information</h2>
+<p>Another way to imagine the data generating mechanism is as a
+consequence of missing covariate information. Suppose that the true data
+generating model is <span class="math display">\[
+\begin{split}
+Z_i &amp;\sim \text{Bernoulli}(\psi_i) \\
+y_i &amp;\sim \text{Bernoulli}(z_i p_{ij})
+\end{split}
+\]</span> where <span class="math inline">\(\text{logit}(\psi_i) =
+\beta0 + x_{1,i}&#39;\beta_1 + x_{2,i}&#39;\beta_2\)</span>. Further
+suppose that we only directly observe <span
+class="math inline">\(x_1\)</span>. In this case, the role of the
+experts is the adjust our mispecified model by information additional
+random effects that can be used as a surrogate for the missing
+covariance information. During data generation, this is achieved by
+thresholding the true probability surface to match the Daubenmire
+classes.</p>
+<h3 id="simulated-data-1">Simulated data</h3>
+<div class="layout-chunk" data-layout="l-body">
+<p><img src="index_files/figure-html5/unnamed-chunk-8-1.png" width="960" style="display: block; margin: auto;" /></p>
+</div>
+<h3 id="fit-models-with-julia-1">Fit models with Julia</h3>
+<p>We consider two potential models:</p>
+<ul>
+<li>model0: basic occupancy model without region-specific random
+effects</li>
+<li>model1: occupancy model with region-specific random effects informed
+by experts</li>
+</ul>
+<p>For the time being, we assume the experts are correct.</p>
+<div class="layout-chunk" data-layout="l-body">
+
+</div>
+<h4 id="model0-1">model0</h4>
+<div class="layout-chunk" data-layout="l-body">
+<pre><code>              Mean       2.5%      97.5%      Rhat ess_bulk
+p        0.5004493  0.4745246  0.5253616 1.0000740 7613.910
+beta[1]  0.5035283  0.2508224  0.7590192 0.9998814 6910.613
+beta[2] -0.9617888 -1.2054501 -0.7304798 1.0007261 5893.471
+psi[1]   0.6283971  0.5674139  0.6871099 0.9998889 6906.563
+psi[2]   0.5027038  0.4483388  0.5564906 0.9998083 6842.481
+psi[3]   0.3641491  0.3056988  0.4229021 1.0008043 6287.028
+psi[4]   0.5544383  0.4980193  0.6090761 0.9998260 6945.503
+psi[5]   0.4869237  0.4328967  0.5407919 0.9998072 6794.286
+psi[6]   0.4912591  0.4371543  0.5450432 0.9998057 6807.877
+psi[7]   0.4554299  0.4013616  0.5099638 0.9998159 6521.480
+psi[8]   0.5079869  0.4534887  0.5617067 0.9998074 6862.377</code></pre>
+<p><img src="index_files/figure-html5/unnamed-chunk-10-1.png" width="960" style="display: block; margin: auto;" /><img src="index_files/figure-html5/unnamed-chunk-10-2.png" width="960" style="display: block; margin: auto;" /></p>
+</div>
+<h4 id="model1-1">model1</h4>
+<div class="layout-chunk" data-layout="l-body">
+<pre><code>                Mean         2.5%       97.5%     Rhat  ess_bulk
+p         0.50063780  0.475242693  0.52647355 1.000084 7288.9061
+tau       0.81656074  0.428287405  1.67859888 1.001071 2447.6461
+beta[1]   0.09986724 -0.764794259  0.99152233 1.005434  487.2515
+beta[2]  -0.12918745 -0.448384129  0.18349802 1.002019 3900.7013
+theta[1] -4.01206799 -5.825694904 -2.58734725 1.001361 2361.6896
+theta[2] -1.68721879 -2.717810619 -0.68258461 1.005888  536.3006
+theta[3] -0.27305739 -1.183951766  0.67654796 1.005134  530.0008
+theta[4]  0.44696410 -0.502108407  1.36346136 1.004521  538.8751
+theta[5]  1.89197815  0.895924091  2.92623146 1.004430  678.3002
+psi[1]    0.17629180  0.090133250  0.29198403 1.001163 3973.1363
+psi[2]    0.02480570  0.002571172  0.07614703 1.001919 1982.2740</code></pre>
+<p><img src="index_files/figure-html5/unnamed-chunk-11-1.png" width="960" style="display: block; margin: auto;" /><img src="index_files/figure-html5/unnamed-chunk-11-2.png" width="960" style="display: block; margin: auto;" /></p>
+</div>
+<h4 id="compare-1">Compare</h4>
+<div class="layout-chunk" data-layout="l-body">
+<p><img src="index_files/figure-html5/unnamed-chunk-12-1.png" width="960" style="display: block; margin: auto;" /><img src="index_files/figure-html5/unnamed-chunk-12-2.png" width="960" style="display: block; margin: auto;" /><img src="index_files/figure-html5/unnamed-chunk-12-3.png" width="960" style="display: block; margin: auto;" /></p>
+</div>
 <h1 id="appendix-models-in-stan">Appendix: Models in Stan</h1>
 <p>Below we provide <code>stan</code> code to fit the above model and
 showcase it on the data from the idyllic scenario. This model takes
 approximately 30 seconds to draw 5000 posterior samples (opposed to ~ 3
 seconds for the Julia version).</p>
+<div class="layout-chunk" data-layout="l-body">
+
+</div>
 <div class="layout-chunk" data-layout="l-body">
 <pre><code>S4 class stanmodel &#39;anon_model&#39; coded as follows:
 // consider https://mc-stan.org/docs/stan-users-guide/multivariate-hierarchical-priors.html
@@ -2132,9 +2211,9 @@ theta[4]  0.83155819 -0.6084308  2.4991407 2254.618 1.0001944
 theta[5]  2.77702915  1.2413799  4.6045594 2566.216 1.0001805
 theta[6]  2.64487948  1.1218330  4.2299176 2505.403 1.0004393
 theta[7] -2.01339127 -4.0167960 -0.1252962 3464.901 1.0004062</code></pre>
-<p><img src="index_files/figure-html5/unnamed-chunk-10-1.png" width="960" style="display: block; margin: auto;" /><img src="index_files/figure-html5/unnamed-chunk-10-2.png" width="960" style="display: block; margin: auto;" /></p>
+<p><img src="index_files/figure-html5/unnamed-chunk-16-1.png" width="960" style="display: block; margin: auto;" /><img src="index_files/figure-html5/unnamed-chunk-16-2.png" width="960" style="display: block; margin: auto;" /></p>
 </div>
-<div class="sourceCode" id="cb5"><pre
+<div class="sourceCode" id="cb7"><pre
 class="sourceCode r distill-force-highlighting-css"><code class="sourceCode r"></code></pre></div>
 <div id="refs" class="references csl-bib-body hanging-indent"
 role="doc-bibliography">
