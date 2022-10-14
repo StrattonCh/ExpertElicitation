@@ -301,4 +301,4 @@ end
 # fit model
 @everywhere curry(f, xs...) = y -> f(y, xs...)
 fit_parallel = pmap(curry(fit_occ_hier, 10000, 2, data_list), [1 2 3])
-mcmctoR(fit_parallel, "expert_hier_idyllic.rds")
+mcmctoR(fit_parallel, "model1.rds")

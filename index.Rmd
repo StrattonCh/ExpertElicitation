@@ -788,7 +788,7 @@ Z_i &\sim \text{Bernoulli}(\psi_i) \\
 y_i &\sim \text{Bernoulli}(z_i p_{ij})
 \end{split}
 \]
-where $\text{logit}(\psi_i) = \beta0 + x_{1,i}'\beta_1 + x_{2,i}'\beta_2$. Further suppose that we only directly observe $x_1$. In this case, the role of the experts is the adjust our mispecified model by information additional random effects that can be used as a surrogate for the missing covariance information. During data generation, this is achieved by thresholding the true probability surface to match the Daubenmire classes.
+where $\text{logit}(\psi_i) = \beta0 + x_{1,i}'\beta_1 + x_{2,i}'\beta_2$. Further suppose that we only directly observe $x_1$. In this case, the role of the experts is to adjust our mispecified model by informing hyper-priors on random effects that can be used as a surrogate for the missing covariance information. During data generation, this is achieved by thresholding the true probability surface to match the Daubenmire classes.
 
 ### Simulated data
 
