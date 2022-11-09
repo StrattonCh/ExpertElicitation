@@ -965,7 +965,16 @@ p4 <- sim_dat$df %>%
   geom_sf(aes(fill = z)) +
   theme_bw()
 
-gridExtra::grid.arrange(p1, p2, p3, p4, nrow = 2)
+p5 <- sim_dat$df %>%
+  mutate(
+    expert_class = factor(ifelse(psi < .05, 1, ifelse(psi >= .05 & psi < .25, 2, ifelse(psi < .5 & psi > .25, 3, ifelse(psi < .75 & psi > .5, 4, ifelse(psi < .95 & psi > .75, 5, 6))))))
+  ) %>%
+  st_as_sf() %>%
+  ggplot() + 
+  geom_sf(aes(fill = expert_class)) +
+  theme_bw()
+
+gridExtra::grid.arrange(p1, p2, p3, p4, p5, nrow = 3)
 ```
 
 ### Fit models with Julia
