@@ -16,11 +16,12 @@ author:
     affiliation: USGS Fort Collins Science Center
     affiliation_url: https://www.usgs.gov/centers/fort-collins-science-center
 date: "`r Sys.Date()`"
-output: 
+output:
   distill::distill_article:
     self_contained: false
     toc: true
     toc_depth: 2
+# output: pdf_document
 bibliography: bibliography.bib
 csl: biometrics_notes.csl
 ---
